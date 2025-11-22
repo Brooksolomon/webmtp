@@ -214,7 +214,7 @@ function FileItem({
 
   const isFolder = file.format === MtpObjectFormat.Association;
   const isImage = file.format === MtpObjectFormat.EXIF_JPEG || file.format === MtpObjectFormat.PNG || file.format === MtpObjectFormat.BMP || file.format === MtpObjectFormat.GIF;
-  const isVideo = file.format === MtpObjectFormat.MPEG || file.format === MtpObjectFormat.AVI;
+  const isVideo = file.format === MtpObjectFormat.MPEG || file.format === MtpObjectFormat.AVI || file.format === MtpObjectFormat.WMV || file.format === MtpObjectFormat.MP4;
 
   const handleClick = () => {
     if (isFolder) {

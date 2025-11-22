@@ -193,16 +193,20 @@ export function useMtp() {
             if (aIsFolder && !bIsFolder) return -1;
             if (!aIsFolder && bIsFolder) return 1;
 
+            let comparison = 0;
             switch (sortBy) {
                 case 'name':
-                    return a.filename.localeCompare(b.filename);
+                    comparison = a.filename.localeCompare(b.filename);
+                    break;
                 case 'size':
-                    return b.compressedSize - a.compressedSize;
+                    comparison = b.compressedSize - a.compressedSize;
+                    break;
                 case 'date':
-                    return b.dateModified.localeCompare(a.dateModified);
-                default:
-                    return 0;
+                    comparison = b.dateModified.localeCompare(a.dateModified);
+                    break;
             }
+
+            return sortOrder === 'asc' ? comparison : -comparison;
         });
 
     return {
