@@ -194,8 +194,16 @@ function FileItem({
     if (!elRef.current) return;
 
     const isFolder = file.format === MtpObjectFormat.Association;
-    const isImage = file.format === MtpObjectFormat.EXIF_JPEG || file.format === MtpObjectFormat.PNG || file.format === MtpObjectFormat.BMP || file.format === MtpObjectFormat.GIF;
-    const isVideo = file.format === MtpObjectFormat.MPEG || file.format === MtpObjectFormat.AVI;
+
+    const isImageFormat = file.format === MtpObjectFormat.EXIF_JPEG || file.format === MtpObjectFormat.PNG || file.format === MtpObjectFormat.BMP || file.format === MtpObjectFormat.GIF;
+    const isVideoFormat = file.format === MtpObjectFormat.MPEG || file.format === MtpObjectFormat.AVI || file.format === MtpObjectFormat.WMV || file.format === MtpObjectFormat.MP4;
+
+    const ext = file.filename.split('.').pop()?.toLowerCase();
+    const isImageExt = ['jpg', 'jpeg', 'png', 'bmp', 'gif', 'webp'].includes(ext || '');
+    const isVideoExt = ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', '3gp'].includes(ext || '');
+
+    const isImage = isImageFormat || isImageExt;
+    const isVideo = isVideoFormat || isVideoExt;
 
     // Only load thumbnails for image/video files and if it's not a folder
     if (isFolder || (!isImage && !isVideo)) return;
@@ -213,8 +221,16 @@ function FileItem({
   }, [file, loadThumbnail]);
 
   const isFolder = file.format === MtpObjectFormat.Association;
-  const isImage = file.format === MtpObjectFormat.EXIF_JPEG || file.format === MtpObjectFormat.PNG || file.format === MtpObjectFormat.BMP || file.format === MtpObjectFormat.GIF;
-  const isVideo = file.format === MtpObjectFormat.MPEG || file.format === MtpObjectFormat.AVI || file.format === MtpObjectFormat.WMV || file.format === MtpObjectFormat.MP4;
+
+  const isImageFormat = file.format === MtpObjectFormat.EXIF_JPEG || file.format === MtpObjectFormat.PNG || file.format === MtpObjectFormat.BMP || file.format === MtpObjectFormat.GIF;
+  const isVideoFormat = file.format === MtpObjectFormat.MPEG || file.format === MtpObjectFormat.AVI || file.format === MtpObjectFormat.WMV || file.format === MtpObjectFormat.MP4;
+
+  const ext = file.filename.split('.').pop()?.toLowerCase();
+  const isImageExt = ['jpg', 'jpeg', 'png', 'bmp', 'gif', 'webp'].includes(ext || '');
+  const isVideoExt = ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm', '3gp'].includes(ext || '');
+
+  const isImage = isImageFormat || isImageExt;
+  const isVideo = isVideoFormat || isVideoExt;
 
   const handleClick = () => {
     if (isFolder) {

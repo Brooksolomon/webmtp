@@ -177,7 +177,18 @@ export function useMtp() {
 
     const loadThumbnail = useCallback((file: MtpObjectInfo) => {
         if (loadedThumbnailsRef.current.has(file.handle)) return;
-        if (file.thumbCompressedSize === 0) return;
+
+        // Debug logging for video files
+        const isVideo = file.format === MtpObjectFormat.MPEG || file.format === MtpObjectFormat.AVI || file.format === MtpObjectFormat.WMV || file.format === MtpObjectFormat.MP4;
+        if (isVideo) {
+            console.log(`Queueing thumbnail for video: ${file.filename}, format: ${file.format.toString(16)}, thumbSize: ${file.thumbCompressedSize}`);
+        }
+
+        if (file.thumbCompressedSize === 0) {
+            // For videos, sometimes the size is reported as 0 but a thumbnail might still exist or be generatable
+            if (!isVideo) return;
+            console.log(`Attempting to load video thumbnail despite size 0: ${file.filename}`);
+        }
 
         loadedThumbnailsRef.current.add(file.handle);
         thumbnailQueueRef.current.push(file);
