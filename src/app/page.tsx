@@ -1,15 +1,15 @@
 'use client';
 
 import { useMtp } from '@/hooks/use-mtp';
-import { Folder, File, ArrowLeft, Usb, HardDrive, Smartphone, Loader2, AlertCircle, Download, Search, Image as ImageIcon, Film, ArrowUp, ArrowDown } from 'lucide-react';
+import { Folder, File, ArrowLeft, Usb, HardDrive, Smartphone, Loader2, AlertCircle, Download, Search, Image as ImageIcon, Film, ArrowUp, ArrowDown, X } from 'lucide-react';
 import { MtpObjectFormat } from '@/lib/mtp/constants';
 import clsx from 'clsx';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export default function Home() {
   const {
     isConnected, isConnecting, files, connect, navigate, navigateUp, downloadFile, currentPath, error,
-    isLoadingFiles, searchQuery, setSearchQuery, sortBy, setSortBy, loadThumbnail, thumbnails, sortOrder, setSortOrder
+    isLoadingFiles, searchQuery, setSearchQuery, sortBy, setSortBy, loadThumbnail, thumbnails, sortOrder, setSortOrder, transfers
   } = useMtp();
 
   return (
@@ -178,6 +178,7 @@ export default function Home() {
           </div>
         )}
       </div>
+      <TransferBubble transfers={transfers} />
     </main>
   );
 }
@@ -290,6 +291,120 @@ function FileItem({
         </div>
       )}
     </button>
+  );
+}
+// Transfer Bubble Component
+function TransferBubble({ transfers }: { transfers: any[] }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const activeTransfers = transfers.filter(t => t.status === 'downloading' || t.status === 'pending');
+  const hasTransfers = transfers.length > 0;
+
+  if (!hasTransfers) return null;
+
+  const totalLoaded = activeTransfers.reduce((acc, t) => acc + t.loaded, 0);
+  const totalSize = activeTransfers.reduce((acc, t) => acc + t.total, 0);
+  const progress = totalSize > 0 ? (totalLoaded / totalSize) * 100 : 0;
+  const isDownloading = activeTransfers.length > 0;
+
+  // Calculate circle circumference for SVG
+  const radius = 24;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (progress / 100) * circumference;
+
+  return (
+    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-4">
+      {isOpen && (
+        <div className="bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl w-80 overflow-hidden animate-in slide-in-from-bottom-5 fade-in duration-200">
+          <div className="p-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-800/50">
+            <h3 className="font-semibold text-white text-sm">Transfers</h3>
+            <button onClick={() => setIsOpen(false)} className="text-neutral-400 hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="max-h-80 overflow-y-auto p-2 space-y-2">
+            {transfers.map((transfer) => (
+              <div key={transfer.id} className="p-3 rounded-xl bg-neutral-800/50 border border-neutral-800">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-white truncate max-w-[180px]" title={transfer.filename}>
+                    {transfer.filename}
+                  </p>
+                  <span className={clsx(
+                    "text-xs font-medium px-2 py-0.5 rounded-full",
+                    transfer.status === 'completed' ? "bg-green-500/10 text-green-400" :
+                      transfer.status === 'error' ? "bg-red-500/10 text-red-400" :
+                        "bg-blue-500/10 text-blue-400"
+                  )}>
+                    {transfer.status === 'completed' ? 'Done' :
+                      transfer.status === 'error' ? 'Error' :
+                        `${Math.round((transfer.loaded / transfer.total) * 100)}%`}
+                  </span>
+                </div>
+                <div className="h-1.5 bg-neutral-700 rounded-full overflow-hidden">
+                  <div
+                    className={clsx(
+                      "h-full transition-all duration-300 rounded-full",
+                      transfer.status === 'completed' ? "bg-green-500" :
+                        transfer.status === 'error' ? "bg-red-500" :
+                          "bg-blue-500"
+                    )}
+                    style={{ width: `${(transfer.loaded / transfer.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="relative group"
+      >
+        {/* Progress Circle */}
+        {isDownloading && (
+          <svg className="w-16 h-16 transform -rotate-90 absolute -top-2 -left-2 pointer-events-none">
+            <circle
+              cx="32"
+              cy="32"
+              r={radius}
+              stroke="currentColor"
+              strokeWidth="3"
+              fill="transparent"
+              className="text-neutral-800"
+            />
+            <circle
+              cx="32"
+              cy="32"
+              r={radius}
+              stroke="currentColor"
+              strokeWidth="3"
+              fill="transparent"
+              strokeDasharray={circumference}
+              strokeDashoffset={strokeDashoffset}
+              className="text-blue-500 transition-all duration-300"
+              strokeLinecap="round"
+            />
+          </svg>
+        )}
+
+        <div className={clsx(
+          "w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all relative z-10",
+          isDownloading ? "bg-neutral-900 text-blue-500" : "bg-blue-600 text-white hover:bg-blue-500"
+        )}>
+          {isDownloading ? (
+            <span className="text-xs font-bold">{Math.round(progress)}%</span>
+          ) : (
+            <Download className="w-5 h-5" />
+          )}
+
+          {activeTransfers.length > 0 && (
+            <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-2 border-neutral-950 flex items-center justify-center">
+              <span className="text-[10px] font-bold text-white">{activeTransfers.length}</span>
+            </div>
+          )}
+        </div>
+      </button>
+    </div>
   );
 }
 

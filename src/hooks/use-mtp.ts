@@ -4,6 +4,16 @@ import { mtpDevice, MtpObjectInfo } from '@/lib/mtp/mtp-device';
 import { usbManager } from '@/lib/usb/usb-manager';
 import { MtpObjectFormat } from '@/lib/mtp/constants';
 
+export interface FileTransfer {
+    id: string;
+    filename: string;
+    loaded: number;
+    total: number;
+    status: 'pending' | 'downloading' | 'completed' | 'error';
+    error?: string;
+    timestamp: number;
+}
+
 export function useMtp() {
     const [isConnected, setIsConnected] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
@@ -16,6 +26,7 @@ export function useMtp() {
     const [searchQuery, setSearchQuery] = useState('');
     const [sortBy, setSortBy] = useState<'name' | 'date' | 'size'>('name');
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+    const [transfers, setTransfers] = useState<FileTransfer[]>([]);
 
     const [thumbnails, setThumbnails] = useState<Record<number, string>>({});
 
@@ -114,26 +125,6 @@ export function useMtp() {
         await loadFiles(currentStorageId, newParent);
     }, [pathStack, currentStorageId, loadFiles]);
 
-    const downloadFile = useCallback(async (file: MtpObjectInfo) => {
-        try {
-            const data = await mtpDevice.readFile(file.handle, (loaded, total) => {
-                console.log(`Downloading ${file.filename}: ${Math.round(loaded / total * 100)}%`);
-            });
-
-            const blob = new Blob([data as unknown as BlobPart], { type: 'application/octet-stream' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = file.filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        } catch (err: any) {
-            console.error(err);
-            setError(`Download failed: ${err.message}`);
-        }
-    }, []);
 
     // Queue for thumbnail loading
     const thumbnailQueueRef = useRef<MtpObjectInfo[]>([]);
@@ -163,6 +154,44 @@ export function useMtp() {
         }
 
         isProcessingQueueRef.current = false;
+    }, []);
+
+    const downloadFile = useCallback(async (file: MtpObjectInfo) => {
+        const transferId = Math.random().toString(36).substring(7);
+        const newTransfer: FileTransfer = {
+            id: transferId,
+            filename: file.filename,
+            loaded: 0,
+            total: file.compressedSize,
+            status: 'pending',
+            timestamp: Date.now()
+        };
+
+        setTransfers(prev => [newTransfer, ...prev]);
+
+        try {
+            setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'downloading' } : t));
+
+            const data = await mtpDevice.readFile(file.handle, (loaded, total) => {
+                setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, loaded, total } : t));
+            });
+
+            const blob = new Blob([data as unknown as BlobPart], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = file.filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'completed', loaded: t.total } : t));
+        } catch (err: any) {
+            console.error(err);
+            setError(`Download failed: ${err.message}`);
+            setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'error', error: err.message } : t));
+        }
     }, []);
 
     // Clear queue when search or sort changes to prioritize new visible items
@@ -238,6 +267,7 @@ export function useMtp() {
         sortBy,
         setSortBy,
         sortOrder,
-        setSortOrder
+        setSortOrder,
+        transfers
     };
 }
