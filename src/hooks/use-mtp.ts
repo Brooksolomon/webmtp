@@ -15,6 +15,7 @@ export function useMtp() {
     const [isLoadingFiles, setIsLoadingFiles] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [sortBy, setSortBy] = useState<'name' | 'date' | 'size'>('name');
+    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
     const [thumbnails, setThumbnails] = useState<Record<number, string>>({});
 
@@ -164,6 +165,16 @@ export function useMtp() {
         isProcessingQueueRef.current = false;
     }, []);
 
+    // Clear queue when search or sort changes to prioritize new visible items
+    useEffect(() => {
+        // Remove queued items from the "loaded" set so they can be re-requested if still visible
+        thumbnailQueueRef.current.forEach(file => {
+            loadedThumbnailsRef.current.delete(file.handle);
+        });
+        thumbnailQueueRef.current = [];
+        isProcessingQueueRef.current = false;
+    }, [searchQuery, sortBy, sortOrder]);
+
     const loadThumbnail = useCallback((file: MtpObjectInfo) => {
         if (loadedThumbnailsRef.current.has(file.handle)) return;
         if (file.thumbCompressedSize === 0) return;
@@ -171,7 +182,7 @@ export function useMtp() {
         loadedThumbnailsRef.current.add(file.handle);
         thumbnailQueueRef.current.push(file);
         processThumbnailQueue();
-    }, [processThumbnailQueue]);
+    }, [processThumbnailQueue, searchQuery, sortBy, sortOrder]);
 
     const filteredFiles = files
         .filter(f => f.filename.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -210,6 +221,8 @@ export function useMtp() {
         searchQuery,
         setSearchQuery,
         sortBy,
-        setSortBy
+        setSortBy,
+        sortOrder,
+        setSortOrder
     };
 }

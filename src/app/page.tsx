@@ -1,7 +1,7 @@
 'use client';
 
 import { useMtp } from '@/hooks/use-mtp';
-import { Folder, File, ArrowLeft, Usb, HardDrive, Smartphone, Loader2, AlertCircle, Download, Search, Image as ImageIcon, Film } from 'lucide-react';
+import { Folder, File, ArrowLeft, Usb, HardDrive, Smartphone, Loader2, AlertCircle, Download, Search, Image as ImageIcon, Film, ArrowUp, ArrowDown } from 'lucide-react';
 import { MtpObjectFormat } from '@/lib/mtp/constants';
 import clsx from 'clsx';
 import { useEffect, useRef } from 'react';
@@ -9,7 +9,7 @@ import { useEffect, useRef } from 'react';
 export default function Home() {
   const {
     isConnected, isConnecting, files, connect, navigate, navigateUp, downloadFile, currentPath, error,
-    isLoadingFiles, searchQuery, setSearchQuery, sortBy, setSortBy, loadThumbnail, thumbnails
+    isLoadingFiles, searchQuery, setSearchQuery, sortBy, setSortBy, loadThumbnail, thumbnails, sortOrder, setSortOrder
   } = useMtp();
 
   return (
@@ -121,24 +121,28 @@ export default function Home() {
                 </div>
 
                 <div className="flex items-center gap-2 bg-neutral-800 rounded-lg p-1">
-                  <button
-                    onClick={() => setSortBy('name')}
-                    className={clsx("px-3 py-1.5 rounded-md text-xs font-medium transition-all", sortBy === 'name' ? "bg-neutral-700 text-white shadow-sm" : "text-neutral-400 hover:text-neutral-300")}
-                  >
-                    Name
-                  </button>
-                  <button
-                    onClick={() => setSortBy('date')}
-                    className={clsx("px-3 py-1.5 rounded-md text-xs font-medium transition-all", sortBy === 'date' ? "bg-neutral-700 text-white shadow-sm" : "text-neutral-400 hover:text-neutral-300")}
-                  >
-                    Date
-                  </button>
-                  <button
-                    onClick={() => setSortBy('size')}
-                    className={clsx("px-3 py-1.5 rounded-md text-xs font-medium transition-all", sortBy === 'size' ? "bg-neutral-700 text-white shadow-sm" : "text-neutral-400 hover:text-neutral-300")}
-                  >
-                    Size
-                  </button>
+                  {(['name', 'date', 'size'] as const).map((key) => (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        if (sortBy === key) {
+                          setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                        } else {
+                          setSortBy(key);
+                          setSortOrder('asc');
+                        }
+                      }}
+                      className={clsx(
+                        "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
+                        sortBy === key ? "bg-neutral-700 text-white shadow-sm" : "text-neutral-400 hover:text-neutral-300"
+                      )}
+                    >
+                      {key.charAt(0).toUpperCase() + key.slice(1)}
+                      {sortBy === key && (
+                        sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                      )}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
