@@ -1,15 +1,15 @@
-
 'use client';
 
 import { useMtp } from '@/hooks/use-mtp';
-import { Folder, File, ArrowLeft, Usb, HardDrive, Smartphone, Loader2, AlertCircle, Download, Search } from 'lucide-react';
+import { Folder, File, ArrowLeft, Usb, HardDrive, Smartphone, Loader2, AlertCircle, Download, Search, Image as ImageIcon, Film } from 'lucide-react';
 import { MtpObjectFormat } from '@/lib/mtp/constants';
 import clsx from 'clsx';
+import { useEffect, useRef } from 'react';
 
 export default function Home() {
   const {
     isConnected, isConnecting, files, connect, navigate, navigateUp, downloadFile, currentPath, error,
-    isLoadingFiles, searchQuery, setSearchQuery, sortBy, setSortBy
+    isLoadingFiles, searchQuery, setSearchQuery, sortBy, setSortBy, loadThumbnail, thumbnails
   } = useMtp();
 
   return (
@@ -154,43 +154,14 @@ export default function Home() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 p-4">
                 {files.map((file) => (
-                  <button
+                  <FileItem
                     key={file.handle}
-                    onClick={() => navigate(file)}
-                    className="group flex items-start gap-3 p-3 rounded-xl hover:bg-neutral-800/50 transition-all text-left border border-transparent hover:border-neutral-700/50"
-                  >
-                    <div className={clsx(
-                      "w-10 h-10 rounded-lg flex items-center justify-center shrink-0 transition-colors",
-                      file.format === MtpObjectFormat.Association
-                        ? "bg-yellow-500/10 text-yellow-500 group-hover:bg-yellow-500/20"
-                        : "bg-blue-500/10 text-blue-500 group-hover:bg-blue-500/20"
-                    )}>
-                      {file.format === MtpObjectFormat.Association ? (
-                        <Folder className="w-5 h-5 fill-current" />
-                      ) : (
-                        <File className="w-5 h-5" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-neutral-200 truncate group-hover:text-white transition-colors">
-                        {file.filename}
-                      </p>
-                      <p className="text-xs text-neutral-500 truncate mt-0.5">
-                        {file.format === MtpObjectFormat.Association ? 'Folder' : formatBytes(file.compressedSize)}
-                      </p>
-                    </div>
-                    {file.format !== MtpObjectFormat.Association && (
-                      <div
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          downloadFile(file);
-                        }}
-                        className="p-2 rounded-lg hover:bg-neutral-700 text-neutral-400 hover:text-white opacity-0 group-hover:opacity-100 transition-all"
-                      >
-                        <Download className="w-4 h-4" />
-                      </div>
-                    )}
-                  </button>
+                    file={file}
+                    navigate={navigate}
+                    downloadFile={downloadFile}
+                    loadThumbnail={loadThumbnail}
+                    thumbnailUrl={thumbnails[file.handle]}
+                  />
                 ))}
 
                 {!isLoadingFiles && files.length === 0 && (
@@ -204,6 +175,101 @@ export default function Home() {
         )}
       </div>
     </main>
+  );
+}
+
+// FileItem Component
+function FileItem({
+  file, navigate, downloadFile, loadThumbnail, thumbnailUrl
+}: {
+  file: any, navigate: (file: any) => void, downloadFile: (file: any) => void, loadThumbnail: (file: any) => void, thumbnailUrl?: string
+}) {
+  const elRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!elRef.current) return;
+
+    const isFolder = file.format === MtpObjectFormat.Association;
+    const isImage = file.format === MtpObjectFormat.EXIF_JPEG || file.format === MtpObjectFormat.PNG || file.format === MtpObjectFormat.BMP || file.format === MtpObjectFormat.GIF;
+    const isVideo = file.format === MtpObjectFormat.MPEG || file.format === MtpObjectFormat.AVI;
+
+    // Only load thumbnails for image/video files and if it's not a folder
+    if (isFolder || (!isImage && !isVideo)) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        loadThumbnail(file);
+        observer.disconnect();
+      }
+    });
+
+    observer.observe(elRef.current);
+
+    return () => observer.disconnect();
+  }, [file, loadThumbnail]);
+
+  const isFolder = file.format === MtpObjectFormat.Association;
+  const isImage = file.format === MtpObjectFormat.EXIF_JPEG || file.format === MtpObjectFormat.PNG || file.format === MtpObjectFormat.BMP || file.format === MtpObjectFormat.GIF;
+  const isVideo = file.format === MtpObjectFormat.MPEG || file.format === MtpObjectFormat.AVI;
+
+  const handleClick = () => {
+    if (isFolder) {
+      navigate(file);
+    } else {
+      downloadFile(file);
+    }
+  };
+
+  return (
+    <button
+      ref={elRef}
+      onClick={handleClick}
+      className="group flex items-start gap-3 p-3 rounded-xl hover:bg-neutral-800/50 transition-all text-left border border-transparent hover:border-neutral-700/50"
+    >
+      <div className={clsx(
+        "w-10 h-10 rounded-lg flex items-center justify-center shrink-0 transition-colors overflow-hidden",
+        isFolder
+          ? "bg-yellow-500/10 text-yellow-500 group-hover:bg-yellow-500/20"
+          : "bg-blue-500/10 text-blue-500 group-hover:bg-blue-500/20"
+      )}>
+        {isFolder ? (
+          <Folder className="w-5 h-5 fill-current" />
+        ) : isImage ? (
+          thumbnailUrl ? (
+            <img src={thumbnailUrl} alt={file.filename} className="w-full h-full object-cover" />
+          ) : (
+            <ImageIcon className="w-5 h-5" />
+          )
+        ) : isVideo ? (
+          thumbnailUrl ? (
+            <img src={thumbnailUrl} alt={file.filename} className="w-full h-full object-cover" />
+          ) : (
+            <Film className="w-5 h-5" />
+          )
+        ) : (
+          <File className="w-5 h-5" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-neutral-200 truncate group-hover:text-white transition-colors">
+          {file.filename}
+        </p>
+        <p className="text-xs text-neutral-500 truncate mt-0.5">
+          {file.format === MtpObjectFormat.Association ? 'Folder' : formatBytes(file.compressedSize)}
+        </p>
+      </div>
+      {file.format !== MtpObjectFormat.Association && (
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            downloadFile(file);
+          }}
+          className="p-2 rounded-lg hover:bg-neutral-700 text-neutral-400 hover:text-white opacity-0 group-hover:opacity-100 transition-all"
+        >
+          <Download className="w-4 h-4" />
+        </div>
+      )}
+    </button>
   );
 }
 

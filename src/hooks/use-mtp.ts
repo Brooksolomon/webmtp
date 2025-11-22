@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { mtpDevice, MtpObjectInfo } from '@/lib/mtp/mtp-device';
 import { usbManager } from '@/lib/usb/usb-manager';
 import { MtpObjectFormat } from '@/lib/mtp/constants';
@@ -16,6 +16,10 @@ export function useMtp() {
     const [searchQuery, setSearchQuery] = useState('');
     const [sortBy, setSortBy] = useState<'name' | 'date' | 'size'>('name');
 
+    const [thumbnails, setThumbnails] = useState<Record<number, string>>({});
+
+    const loadedThumbnailsRef = useRef<Set<number>>(new Set());
+
     useEffect(() => {
         const onConnected = () => setIsConnected(true);
         const onDisconnected = () => {
@@ -24,6 +28,8 @@ export function useMtp() {
             setPathStack([]);
             setCurrentStorageId(null);
             setIsLoadingFiles(false);
+            setThumbnails({});
+            loadedThumbnailsRef.current.clear();
         };
 
         usbManager.on('connected', onConnected);
@@ -37,6 +43,10 @@ export function useMtp() {
 
     const loadFiles = useCallback(async (storageId: number, parentHandle: number) => {
         setIsLoadingFiles(true);
+        setThumbnails({});
+        loadedThumbnailsRef.current.clear();
+        thumbnailQueueRef.current = []; // Clear pending thumbnails
+
         try {
             const handles = await mtpDevice.getObjectHandles(storageId, parentHandle);
             const fileInfos = await Promise.all(handles.map(h => mtpDevice.getObjectInfo(h)));
@@ -124,6 +134,45 @@ export function useMtp() {
         }
     }, []);
 
+    // Queue for thumbnail loading
+    const thumbnailQueueRef = useRef<MtpObjectInfo[]>([]);
+    const isProcessingQueueRef = useRef(false);
+
+    const processThumbnailQueue = useCallback(async () => {
+        if (isProcessingQueueRef.current) return;
+        isProcessingQueueRef.current = true;
+
+        while (thumbnailQueueRef.current.length > 0) {
+            const file = thumbnailQueueRef.current.shift();
+            if (!file) continue;
+
+            try {
+                // Small delay to allow UI updates and prevent USB choking
+                await new Promise(resolve => setTimeout(resolve, 10));
+
+                const data = await mtpDevice.getThumbnail(file.handle);
+                if (data) {
+                    const blob = new Blob([data as unknown as BlobPart], { type: 'image/jpeg' });
+                    const url = URL.createObjectURL(blob);
+                    setThumbnails(prev => ({ ...prev, [file.handle]: url }));
+                }
+            } catch (err) {
+                console.warn(`Failed to load thumbnail for ${file.filename}`, err);
+            }
+        }
+
+        isProcessingQueueRef.current = false;
+    }, []);
+
+    const loadThumbnail = useCallback((file: MtpObjectInfo) => {
+        if (loadedThumbnailsRef.current.has(file.handle)) return;
+        if (file.thumbCompressedSize === 0) return;
+
+        loadedThumbnailsRef.current.add(file.handle);
+        thumbnailQueueRef.current.push(file);
+        processThumbnailQueue();
+    }, [processThumbnailQueue]);
+
     const filteredFiles = files
         .filter(f => f.filename.toLowerCase().includes(searchQuery.toLowerCase()))
         .sort((a, b) => {
@@ -154,6 +203,8 @@ export function useMtp() {
         navigate,
         navigateUp,
         downloadFile,
+        loadThumbnail,
+        thumbnails,
         error,
         currentPath: pathStack,
         searchQuery,

@@ -302,6 +302,18 @@ export class MtpDevice {
 
         return resultBuffer;
     }
+
+    async getThumbnail(handle: number): Promise<Uint8Array | null> {
+        try {
+            // Check if it has a thumbnail first? 
+            // We can just try GetThumb (0x100A)
+            const data = await this.performTransactionWithData(MtpOperationCode.GetThumb, [handle]);
+            return new Uint8Array(data);
+        } catch (e) {
+            // It's common for files to not have thumbnails
+            return null;
+        }
+    }
 }
 
 export const mtpDevice = new MtpDevice();
