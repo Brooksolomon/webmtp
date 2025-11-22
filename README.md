@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# WebMTP - Browser-based Android File Transfer
 
-## Getting Started
+A modern, web-based MTP (Media Transfer Protocol) client built with Next.js and WebUSB.
+Allows you to manage files on your Android device directly from the browser without installing any software.
 
-First, run the development server:
+## Features
+
+- 🚀 **No Installation**: Runs entirely in the browser.
+- 📱 **Android Support**: Connect any Android device (select "File Transfer" mode).
+- 📂 **File Browsing**: Navigate folders and view file metadata.
+- ⬇️ **Download**: Download files from device to computer.
+- 🎨 **Modern UI**: Clean, dark-mode interface.
+
+## Requirements
+
+- **Browser**: Google Chrome, Microsoft Edge, or Opera (browsers with WebUSB support).
+- **OS**: Windows, macOS, Linux, Android, ChromeOS.
+- **Connection**: USB Cable.
+
+## Usage
+
+1. Connect your Android device via USB.
+2. On your Android device, tap the "Charging via USB" notification and select **"File Transfer"** or **"MTP"**.
+3. Open this app in a supported browser.
+4. Click **"Connect Device"**.
+5. Select your device from the browser popup.
+6. Browse and transfer files!
+
+## Development
+
+This project uses:
+- **Next.js 15** (App Router)
+- **TypeScript**
+- **Tailwind CSS**
+- **WebUSB API**
+
+### Running Locally
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Architecture
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **USB Layer**: `src/lib/usb/usb-manager.ts` - Handles raw WebUSB transfers.
+- **MTP Layer**: `src/lib/mtp/` - Implements MTP protocol (Packet framing, Operations).
+- **State**: `src/hooks/use-mtp.ts` - React hook for device state and navigation.
+- **UI**: `src/app/page.tsx` - Main interface.
 
-## Learn More
+## License
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT
