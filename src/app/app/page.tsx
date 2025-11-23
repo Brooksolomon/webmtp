@@ -460,9 +460,28 @@ export default function Home() {
                 <p>Loading files...</p>
               </div>
             ) : files.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-24 text-neutral-500 gap-4">
-                <Folder className="w-12 h-12 opacity-20" />
-                <p>No files found</p>
+              <div className="flex flex-col items-center justify-center py-16 px-4 text-center text-neutral-400 gap-6 max-w-md mx-auto">
+                <Folder className="w-16 h-16 opacity-30" />
+                <div className="space-y-2">
+                  <p className="text-lg font-medium text-white">No files found</p>
+                  <p className="text-sm">
+                    If you're not seeing any files, try these steps:
+                  </p>
+                </div>
+                <ul className="text-sm space-y-2 text-left w-full bg-white/5 p-4 rounded-lg border border-white/10">
+                  <li className="flex items-start gap-2">
+                    <Check className="w-4 h-4 mt-0.5 text-green-400 flex-shrink-0" />
+                    <span>Make sure your phone is unlocked and set to <span className="font-medium text-white">File Transfer</span> or <span className="font-medium text-white">MTP</span> mode (not just charging)</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <Check className="w-4 h-4 mt-0.5 text-green-400 flex-shrink-0" />
+                    <span>Try a different USB port or cable if available</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <Check className="w-4 h-4 mt-0.5 text-green-400 flex-shrink-0" />
+                    <span>Check if your phone shows a notification to allow file transfer</span>
+                  </li>
+                </ul>
               </div>
             ) : (
               <div
