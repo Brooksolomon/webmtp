@@ -41,7 +41,7 @@ export default function Home() {
   const {
     isConnected, isConnecting, files, connect, navigate, navigateUp, downloadFile, uploadFiles, currentPath, error,
     isLoadingFiles, searchQuery, setSearchQuery, sortBy, setSortBy, loadThumbnail, thumbnails, sortOrder, setSortOrder, transfers,
-    goBack, goForward, goHome, canGoBack, canGoForward, pauseTransfer, resumeTransfer, viewMode, setViewMode,
+    goBack, goForward, goHome, canGoBack, canGoForward, pauseTransfer, resumeTransfer, cancelTransfer, viewMode, setViewMode,
     selectedFiles, toggleFileSelection, clearSelection, selectAll, deleteSelected, renameFile, moveFiles, copyFiles,
     createNewFolder, downloadMultiple, currentStorageId, currentParentHandle, loadFiles
   } = useMtp();
@@ -557,7 +557,7 @@ export default function Home() {
           </div>
         )}
       </div>
-      <TransferBubble transfers={transfers} onPause={pauseTransfer} onResume={resumeTransfer} />
+      <TransferBubble transfers={transfers} onPause={pauseTransfer} onResume={resumeTransfer} onCancel={cancelTransfer} />
       
       {/* Rename Dialog */}
       {showRenameDialog && renameTarget && (
@@ -1047,7 +1047,7 @@ const FileItem = memo(function FileItem({
   );
 });
 
-function TransferBubble({ transfers, onPause, onResume }: { transfers: FileTransfer[], onPause: (id: string) => void, onResume: (id: string) => void }) {
+function TransferBubble({ transfers, onPause, onResume, onCancel }: { transfers: FileTransfer[], onPause: (id: string) => void, onResume: (id: string) => void, onCancel: (id: string) => void }) {
   const [isOpen, setIsOpen] = useState(false);
   const activeTransfers = transfers.filter(t => ['downloading', 'pending', 'paused', 'uploading'].includes(t.status));
   const hasTransfers = transfers.length > 0;
@@ -1092,6 +1092,7 @@ function TransferBubble({ transfers, onPause, onResume }: { transfers: FileTrans
                         "text-xs",
                         transfer.status === 'error' ? "text-red-400" :
                           transfer.status === 'completed' ? "text-green-400" :
+                          transfer.status === 'cancelled' ? "text-orange-400" :
                             "text-neutral-500"
                       )}>
                         {transfer.status === 'downloading' || transfer.status === 'uploading' ? (
@@ -1111,34 +1112,65 @@ function TransferBubble({ transfers, onPause, onResume }: { transfers: FileTrans
                   </div>
                 </div>
 
-                {(transfer.status === 'downloading' || transfer.status === 'uploading' || transfer.status === 'paused') && (
+                {(transfer.status === 'downloading' || transfer.status === 'uploading' || transfer.status === 'paused' || transfer.status === 'pending') && (
                   <div className="flex items-center gap-2">
                     <div className="h-1.5 flex-1 bg-neutral-800 rounded-full overflow-hidden">
                       <div
                         className={clsx(
                           "h-full rounded-full transition-all duration-300",
-                          transfer.status === 'paused' ? "bg-yellow-500" : "bg-blue-500"
+                          transfer.status === 'paused' ? "bg-yellow-500" : 
+                          transfer.status === 'pending' ? "bg-neutral-600" : "bg-blue-500"
                         )}
                         style={{ width: `${(transfer.loaded / transfer.total) * 100}%` }}
                       />
                     </div>
-                    {transfer.status === 'paused' ? (
-                      <button
-                        onClick={() => onResume(transfer.id)}
-                        className="p-1 hover:bg-neutral-700 rounded text-blue-400"
-                        title="Resume"
-                      >
-                        <Play className="w-3 h-3" />
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => onPause(transfer.id)}
-                        className="p-1 hover:bg-neutral-700 rounded text-yellow-400"
-                        title="Pause"
-                      >
-                        <Pause className="w-3 h-3" />
-                      </button>
-                    )}
+                    <div className="flex items-center gap-1">
+                      {transfer.status === 'paused' ? (
+                        <button
+                          onClick={() => onResume(transfer.id)}
+                          className="p-1 hover:bg-neutral-700 rounded text-blue-400"
+                          title="Resume"
+                        >
+                          <Play className="w-3 h-3" />
+                        </button>
+                      ) : transfer.status === 'pending' ? (
+                        <button
+                          onClick={() => onCancel(transfer.id)}
+                          className="p-1 hover:bg-neutral-700 rounded text-red-400"
+                          title="Cancel"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => onPause(transfer.id)}
+                          className="p-1 hover:bg-neutral-700 rounded text-yellow-400"
+                          title="Pause"
+                        >
+                          <Pause className="w-3 h-3" />
+                        </button>
+                      )}
+                      {(transfer.status === 'downloading' || transfer.status === 'uploading' || transfer.status === 'paused') && (
+                        <button
+                          onClick={() => onCancel(transfer.id)}
+                          className="p-1 hover:bg-neutral-700 rounded text-red-400"
+                          title="Cancel"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {transfer.status === 'cancelled' && (
+                  <div className="flex items-center gap-2">
+                    <div className="h-1.5 flex-1 bg-neutral-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-orange-500/50"
+                        style={{ width: `${(transfer.loaded / transfer.total) * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-xs text-orange-400">Cancelled</span>
                   </div>
                 )}
                 {transfer.error && (

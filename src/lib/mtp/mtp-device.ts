@@ -233,8 +233,24 @@ export class MtpDevice {
     }
 
     async readFile(handle: number, onProgress?: (loaded: number, total: number) => void, control?: { signal: AbortSignal, pause?: () => Promise<void> }): Promise<Uint8Array> {
+        // Check for abort before doing any work
+        if (control?.signal.aborted) {
+            throw new Error('Transfer aborted');
+        }
+        
         const info = await this.getObjectInfo(handle);
         const totalSize = info.compressedSize;
+        
+        // Check for abort again after getting info
+        if (control?.signal.aborted) {
+            throw new Error('Transfer aborted');
+        }
+        
+        // Add safety check for extremely large files that might cause memory issues
+        if (totalSize > 4 * 1024 * 1024 * 1024) { // 4GB limit
+            throw new Error('File too large for memory-based download');
+        }
+        
         const resultBuffer = new Uint8Array(totalSize);
         let offset = 0;
 

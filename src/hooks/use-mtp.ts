@@ -9,7 +9,7 @@ export interface FileTransfer {
     filename: string;
     loaded: number;
     total: number;
-    status: 'pending' | 'downloading' | 'uploading' | 'completed' | 'error' | 'paused';
+    status: 'pending' | 'downloading' | 'uploading' | 'completed' | 'error' | 'paused' | 'cancelled';
     error?: string;
     timestamp: number;
     speed?: number; // bytes per second
@@ -155,6 +155,17 @@ export function useMtp() {
                 transferControlsRef.current[id].resume = undefined;
             }
             setTransfers(prev => prev.map(t => t.id === id ? { ...t, status: 'downloading' } : t));
+        }
+    }, []);
+
+    const cancelTransfer = useCallback((id: string) => {
+        if (transferControlsRef.current[id]) {
+            transferControlsRef.current[id].abortController.abort();
+            // Update the transfer status to 'cancelled' instead of removing it
+            setTransfers(prev => prev.map(t => 
+                t.id === id ? { ...t, status: 'cancelled' as const } : t
+            ));
+            delete transferControlsRef.current[id];
         }
     }, []);
 
@@ -421,7 +432,7 @@ export function useMtp() {
                 } catch (err: any) {
                     if (err.name === 'AbortError') {
                         // User cancelled save dialog
-                        setTransfers(prev => prev.filter(t => t.id !== transferId));
+                        setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'cancelled' } : t));
                         return;
                     }
                     throw err;
@@ -451,8 +462,11 @@ export function useMtp() {
             setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'completed', loaded: t.total, speed: 0 } : t));
         } catch (err: any) {
             console.error(err);
-            if (err.message === 'Aborted' || err.message === 'Transfer aborted') {
-                setTransfers(prev => prev.filter(t => t.id !== transferId));
+            if (err.message === 'Aborted' || err.message === 'Transfer aborted' || err.name === 'AbortError') {
+                setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'cancelled' } : t));
+            } else if (err.name === 'RangeError' && err.message.includes('Array buffer allocation failed')) {
+                // Handle buffer allocation failure (likely due to cancellation)
+                setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'cancelled' } : t));
             } else {
                 setError(`Download failed: ${err.message}`);
                 setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'error', error: err.message, speed: 0 } : t));
@@ -565,8 +579,8 @@ export function useMtp() {
                 setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'completed', loaded: t.total, speed: 0 } : t));
             } catch (err: any) {
                 console.error(err);
-                if (err.message === 'Aborted') {
-                    setTransfers(prev => prev.filter(t => t.id !== transferId));
+                if (err.message === 'Aborted' || err.name === 'AbortError') {
+                    setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'cancelled' } : t));
                 } else {
                     setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'error', error: err.message, speed: 0 } : t));
                 }
@@ -755,6 +769,7 @@ export function useMtp() {
         canGoForward,
         pauseTransfer,
         resumeTransfer,
+        cancelTransfer,
         selectedFiles,
         toggleFileSelection,
         clearSelection,
