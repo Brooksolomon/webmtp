@@ -402,9 +402,9 @@ export default function Home() {
       </div>
 
       {/* Main Content */}
-      <div className="relative z-10 p-6">
+      <div className="relative z-10 p-8">
         {!isConnected ? (
-          <div className="h-[calc(100vh-8rem)] flex flex-col items-center justify-center gap-6 animate-in fade-in zoom-in duration-500">
+          <div className="h-[calc(100vh-10rem)] flex flex-col items-center justify-center gap-8 animate-in fade-in zoom-in duration-500">
             <div className="relative">
               <div className="absolute inset-0 bg-blue-500/20 blur-3xl rounded-full" />
               <div className="w-24 h-24 bg-neutral-900 border border-neutral-800 rounded-3xl flex items-center justify-center shadow-2xl relative z-10">
@@ -416,7 +416,7 @@ export default function Home() {
                 </div>
               )}
             </div>
-            <div className="text-center space-y-2">
+            <div className="text-center space-y-4">
               <h2 className="text-2xl font-bold text-white">Connect Device</h2>
               <p className="text-neutral-400 max-w-xs mx-auto">
                 Connect your Android device via USB and ensure file transfer mode is enabled.
@@ -425,7 +425,7 @@ export default function Home() {
             <button
               onClick={connect}
               disabled={isConnecting}
-              className="bg-white text-black px-8 py-3 rounded-full font-medium hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-95 shadow-lg shadow-white/10"
+              className="bg-white text-black px-10 py-4 rounded-full font-medium hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-95 shadow-lg shadow-white/10"
             >
               {isConnecting ? 'Connecting...' : 'Connect via USB'}
             </button>
@@ -438,7 +438,7 @@ export default function Home() {
           </div>
         ) : (
           <div
-            className="space-y-2 pb-20 relative"
+            className="space-y-4 pb-24 relative"
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
@@ -447,7 +447,7 @@ export default function Home() {
             {currentPath.length > 0 && (
               <button
                 onClick={navigateUp}
-                className="flex items-center gap-2 text-neutral-400 hover:text-white mb-4 px-2 py-1 rounded-lg hover:bg-neutral-900 w-fit transition-colors"
+                className="flex items-center gap-2 text-neutral-400 hover:text-white mb-6 px-3 py-2 rounded-lg hover:bg-neutral-900 w-fit transition-colors"
               >
                 <ArrowLeft className="w-4 h-4" />
                 <span>Back to {currentPath.length > 1 ? currentPath[currentPath.length - 2].name : 'Root'}</span>
@@ -455,12 +455,12 @@ export default function Home() {
             )}
 
             {isLoadingFiles ? (
-              <div className="flex flex-col items-center justify-center py-20 text-neutral-500 gap-3">
+              <div className="flex flex-col items-center justify-center py-24 text-neutral-500 gap-4">
                 <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
                 <p>Loading files...</p>
               </div>
             ) : files.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-neutral-500 gap-3">
+              <div className="flex flex-col items-center justify-center py-24 text-neutral-500 gap-4">
                 <Folder className="w-12 h-12 opacity-20" />
                 <p>No files found</p>
               </div>
@@ -470,8 +470,8 @@ export default function Home() {
                 className={clsx(
                   "relative",
                   viewMode === 'grid'
-                    ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4"
-                    : "flex flex-col gap-1"
+                    ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6"
+                    : "flex flex-col gap-2"
                 )}
                 onMouseDown={(e) => {
                   if (e.button === 0 && !e.shiftKey && !e.ctrlKey && !e.metaKey && e.target === e.currentTarget) {
