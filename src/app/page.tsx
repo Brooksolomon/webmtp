@@ -47,13 +47,6 @@ export default function LandingPage() {
             </span>
           </Link>
           <Link 
-            href="/docs"
-            className="px-4 py-2 text-neutral-300 hover:text-white hover:bg-white/10 rounded-lg text-sm font-medium transition-all duration-300 hover:scale-105"
-          >
-            Documentation
-          </Link>
-          <div className="w-px h-6 bg-white/20 mx-1" />
-          <Link 
             href="/app"
             className="px-5 py-2 bg-gradient-to-r from-white/20 to-white/10 hover:from-white/30 hover:to-white/20 text-white rounded-xl text-sm font-semibold transition-all duration-300 hover:scale-105 border border-white/20 hover:border-white/30 shadow-lg shadow-white/10"
           >
