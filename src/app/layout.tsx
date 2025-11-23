@@ -35,10 +35,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className="h-full">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-black text-white min-h-full`}
       >
+        <div className="fixed inset-0 -z-10 bg-black"></div>
         {children}
       </body>
     </html>
