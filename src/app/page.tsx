@@ -2,17 +2,20 @@
 
 import { useMtp, FileTransfer } from '@/hooks/use-mtp';
 import { MtpObjectInfo } from '@/lib/mtp/mtp-device';
-import { Folder, File, ArrowLeft, Usb, HardDrive, Smartphone, Loader2, AlertCircle, Download, Search, Image as ImageIcon, Film, ArrowUp, ArrowDown, X, ChevronLeft, ChevronRight, Home as HomeIcon, Pause, Play, LayoutGrid, List } from 'lucide-react';
+import { Folder, File, ArrowLeft, Usb, HardDrive, Smartphone, Loader2, AlertCircle, Download, Search, Image as ImageIcon, Film, ArrowUp, ArrowDown, X, ChevronLeft, ChevronRight, Home as HomeIcon, Pause, Play, LayoutGrid, List, Upload, FolderPlus } from 'lucide-react';
 import { MtpObjectFormat } from '@/lib/mtp/constants';
 import clsx from 'clsx';
 import { useEffect, useRef, useState, memo } from 'react';
 
 export default function Home() {
   const {
-    isConnected, isConnecting, files, connect, navigate, navigateUp, downloadFile, currentPath, error,
+    isConnected, isConnecting, files, connect, navigate, navigateUp, downloadFile, uploadFiles, currentPath, error,
     isLoadingFiles, searchQuery, setSearchQuery, sortBy, setSortBy, loadThumbnail, thumbnails, sortOrder, setSortOrder, transfers,
     goBack, goForward, goHome, canGoBack, canGoForward, pauseTransfer, resumeTransfer, viewMode, setViewMode
   } = useMtp();
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   return (
     <main className="min-h-screen bg-neutral-950 text-neutral-200 font-sans selection:bg-blue-500/30">
@@ -92,17 +95,63 @@ export default function Home() {
           )}
         </div>
 
-        {/* Search & Sort */}
+        {/* Search & Sort & Upload */}
         {isConnected && (
           <div className="flex items-center gap-3">
+            {/* Upload Controls */}
+            <div className="flex items-center gap-1 bg-neutral-900 p-1 rounded-lg border border-neutral-800">
+              <input
+                type="file"
+                multiple
+                className="hidden"
+                ref={fileInputRef}
+                onChange={(e) => {
+                  if (e.target.files) uploadFiles(e.target.files);
+                  e.target.value = ''; // Reset
+                }}
+              />
+              <input
+                type="file"
+                // @ts-ignore
+                webkitdirectory=""
+                directory=""
+                className="hidden"
+                ref={folderInputRef}
+                onChange={(e) => {
+                  if (e.target.files) uploadFiles(e.target.files);
+                  e.target.value = ''; // Reset
+                }}
+              />
+
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="px-3 py-1.5 rounded-md text-xs font-medium text-neutral-400 hover:text-white hover:bg-neutral-800 transition-all flex items-center gap-2"
+                title="Upload Files"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Files</span>
+              </button>
+              <div className="w-px h-4 bg-neutral-800" />
+              <button
+                onClick={() => folderInputRef.current?.click()}
+                className="px-3 py-1.5 rounded-md text-xs font-medium text-neutral-400 hover:text-white hover:bg-neutral-800 transition-all flex items-center gap-2"
+                title="Upload Folder"
+              >
+                <FolderPlus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Folder</span>
+              </button>
+            </div>
+
+            <div className="h-6 w-px bg-neutral-800" />
+
             <div className="relative group">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 group-focus-within:text-blue-500 transition-colors" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search files..."
-                className="bg-neutral-900 border border-neutral-800 rounded-full pl-9 pr-4 py-1.5 text-sm focus:outline-none focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/10 w-48 transition-all"
+                placeholder="Search..."
+                className="bg-neutral-900 border border-neutral-800 rounded-full pl-9 pr-4 py-1.5 text-sm focus:outline-none focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/10 w-32 focus:w-48 transition-all"
               />
             </div>
             <div className="h-6 w-px bg-neutral-800" />
@@ -417,7 +466,7 @@ const FileItem = memo(function FileItem({
 
 function TransferBubble({ transfers, onPause, onResume }: { transfers: FileTransfer[], onPause: (id: string) => void, onResume: (id: string) => void }) {
   const [isOpen, setIsOpen] = useState(false);
-  const activeTransfers = transfers.filter(t => ['downloading', 'pending', 'paused'].includes(t.status));
+  const activeTransfers = transfers.filter(t => ['downloading', 'pending', 'paused', 'uploading'].includes(t.status));
   const hasTransfers = transfers.length > 0;
 
   if (!hasTransfers) return null;
@@ -426,7 +475,8 @@ function TransferBubble({ transfers, onPause, onResume }: { transfers: FileTrans
   const totalSize = activeTransfers.reduce((acc, t) => acc + t.total, 0);
   const progress = totalSize > 0 ? (totalLoaded / totalSize) * 100 : 0;
   const isDownloading = activeTransfers.some(t => t.status === 'downloading');
-  const isPaused = activeTransfers.some(t => t.status === 'paused') && !isDownloading;
+  const isUploading = activeTransfers.some(t => t.status === 'uploading');
+  const isPaused = activeTransfers.some(t => t.status === 'paused') && !isDownloading && !isUploading;
 
   // Calculate circle circumference for SVG
   const radius = 24;
@@ -437,62 +487,82 @@ function TransferBubble({ transfers, onPause, onResume }: { transfers: FileTrans
     <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-4">
       {isOpen && (
         <div className="bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl w-80 overflow-hidden animate-in slide-in-from-bottom-5 fade-in duration-200">
-          <div className="p-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-800/50">
-            <h3 className="font-semibold text-white text-sm">Transfers</h3>
-            <button onClick={() => setIsOpen(false)} className="text-neutral-400 hover:text-white">
+          <div className="p-4 border-b border-neutral-800 flex items-center justify-between bg-neutral-900/50 backdrop-blur-sm">
+            <h3 className="font-medium text-white">Transfers</h3>
+            <button onClick={() => setIsOpen(false)} className="text-neutral-500 hover:text-white">
               <X className="w-4 h-4" />
             </button>
           </div>
-          <div className="max-h-80 overflow-y-auto p-2 space-y-2">
+          <div className="max-h-96 overflow-y-auto p-2 space-y-1">
             {transfers.map((transfer) => (
-              <div key={transfer.id} className="p-3 rounded-xl bg-neutral-800/50 border border-neutral-800">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-white truncate max-w-[140px]" title={transfer.filename}>
-                    {transfer.filename}
-                  </p>
+              <div key={transfer.id} className="p-3 rounded-xl bg-neutral-800/30 border border-neutral-800/50 flex flex-col gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-neutral-800 rounded-lg">
+                    {transfer.direction === 'upload' ? <Upload className="w-4 h-4 text-neutral-400" /> : <Download className="w-4 h-4 text-neutral-400" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-neutral-200 truncate" title={transfer.filename}>
+                      {transfer.filename}
+                    </p>
+                    <div className="flex items-center justify-between mt-1">
+                      <p className={clsx(
+                        "text-xs",
+                        transfer.status === 'error' ? "text-red-400" :
+                          transfer.status === 'completed' ? "text-green-400" :
+                            "text-neutral-500"
+                      )}>
+                        {transfer.status === 'downloading' || transfer.status === 'uploading' ? (
+                          <span className="flex items-center gap-2">
+                            <span>{formatBytes(transfer.loaded)} / {formatBytes(transfer.total)}</span>
+                            {transfer.speed !== undefined && (
+                              <span className="text-neutral-400">
+                                ({formatBytes(transfer.speed)}/s)
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          transfer.status.charAt(0).toUpperCase() + transfer.status.slice(1)
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {(transfer.status === 'downloading' || transfer.status === 'uploading' || transfer.status === 'paused') && (
                   <div className="flex items-center gap-2">
-                    {transfer.status === 'downloading' && (
-                      <button onClick={() => onPause(transfer.id)} className="p-1 hover:bg-neutral-700 rounded text-neutral-400 hover:text-white transition-colors">
+                    <div className="h-1.5 flex-1 bg-neutral-800 rounded-full overflow-hidden">
+                      <div
+                        className={clsx(
+                          "h-full rounded-full transition-all duration-300",
+                          transfer.status === 'paused' ? "bg-yellow-500" : "bg-blue-500"
+                        )}
+                        style={{ width: `${(transfer.loaded / transfer.total) * 100}%` }}
+                      />
+                    </div>
+                    {transfer.status === 'paused' ? (
+                      <button
+                        onClick={() => onResume(transfer.id)}
+                        className="p-1 hover:bg-neutral-700 rounded text-blue-400"
+                        title="Resume"
+                      >
+                        <Play className="w-3 h-3" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => onPause(transfer.id)}
+                        className="p-1 hover:bg-neutral-700 rounded text-yellow-400"
+                        title="Pause"
+                      >
                         <Pause className="w-3 h-3" />
                       </button>
                     )}
-                    {transfer.status === 'paused' && (
-                      <button onClick={() => onResume(transfer.id)} className="p-1 hover:bg-neutral-700 rounded text-neutral-400 hover:text-white transition-colors">
-                        <Play className="w-3 h-3" />
-                      </button>
-                    )}
-                    <span className={clsx(
-                      "text-xs font-medium px-2 py-0.5 rounded-full",
-                      transfer.status === 'completed' ? "bg-green-500/10 text-green-400" :
-                        transfer.status === 'error' ? "bg-red-500/10 text-red-400" :
-                          transfer.status === 'paused' ? "bg-yellow-500/10 text-yellow-400" :
-                            "bg-blue-500/10 text-blue-400"
-                    )}>
-                      {transfer.status === 'completed' ? 'Done' :
-                        transfer.status === 'error' ? 'Error' :
-                          transfer.status === 'paused' ? 'Paused' :
-                            `${Math.round((transfer.loaded / transfer.total) * 100)}%`}
-                    </span>
                   </div>
-                </div>
-                <div className="flex items-center justify-between text-xs text-neutral-500 mb-1">
-                  <span>{formatBytes(transfer.loaded)} / {formatBytes(transfer.total)}</span>
-                  {transfer.speed !== undefined && transfer.status === 'downloading' && (
-                    <span>{formatBytes(transfer.speed)}/s</span>
-                  )}
-                </div>
-                <div className="h-1.5 bg-neutral-700 rounded-full overflow-hidden">
-                  <div
-                    className={clsx(
-                      "h-full transition-all duration-300 rounded-full",
-                      transfer.status === 'completed' ? "bg-green-500" :
-                        transfer.status === 'error' ? "bg-red-500" :
-                          transfer.status === 'paused' ? "bg-yellow-500" :
-                            "bg-blue-500"
-                    )}
-                    style={{ width: `${(transfer.loaded / transfer.total) * 100}%` }}
-                  />
-                </div>
+                )}
+                {transfer.error && (
+                  <p className="text-xs text-red-400 bg-red-400/10 p-2 rounded-lg border border-red-400/20">
+                    {transfer.error}
+                  </p>
+                )}
               </div>
             ))}
           </div>
@@ -504,7 +574,7 @@ function TransferBubble({ transfers, onPause, onResume }: { transfers: FileTrans
         className="relative group"
       >
         {/* Progress Circle */}
-        {(isDownloading || isPaused) && (
+        {(isDownloading || isUploading || isPaused) && (
           <svg className="w-16 h-16 transform -rotate-90 absolute -top-2 -left-2 pointer-events-none">
             <circle
               cx="32"

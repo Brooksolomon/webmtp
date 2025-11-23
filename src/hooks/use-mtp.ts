@@ -9,13 +9,15 @@ export interface FileTransfer {
     filename: string;
     loaded: number;
     total: number;
-    status: 'pending' | 'downloading' | 'completed' | 'error' | 'paused';
+    status: 'pending' | 'downloading' | 'uploading' | 'completed' | 'error' | 'paused';
     error?: string;
     timestamp: number;
     speed?: number; // bytes per second
+    direction: 'download' | 'upload';
 }
 
 export function useMtp() {
+    // ... (existing state)
     const [isConnected, setIsConnected] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
     const [files, setFiles] = useState<MtpObjectInfo[]>([]);
@@ -92,12 +94,6 @@ export function useMtp() {
 
     const processThumbnailQueue = useCallback(async () => {
         if (isProcessingQueueRef.current) return;
-
-        // Don't process thumbnails if a download is active to prevent USB contention
-        // We check the ref directly if possible, but state is safer for React consistency.
-        // However, state might be stale in a closure? No, we use transfers in dependency.
-        // Actually, let's check the latest state via a functional update trick or just trust the dependency.
-        // But to be super safe and avoid stale closures in the async loop:
 
         isProcessingQueueRef.current = true;
 
@@ -321,7 +317,8 @@ export function useMtp() {
             total: file.compressedSize,
             status: 'pending',
             timestamp: Date.now(),
-            speed: 0
+            speed: 0,
+            direction: 'download'
         };
 
         setTransfers(prev => [newTransfer, ...prev]);
@@ -347,11 +344,6 @@ export function useMtp() {
                     });
                     // Reset speed calculation after pause
                     lastTime = Date.now();
-                    // We don't reset lastLoaded because loaded is absolute.
-                    // But we need to make sure the next speed calc uses the correct delta.
-                    // The next callback will have a new 'loaded'.
-                    // If we just reset lastTime, the next timeDiff will be small, and bytesDiff will be (newLoaded - lastLoaded).
-                    // This is correct.
                 }
             };
 
@@ -400,6 +392,78 @@ export function useMtp() {
         }
     }, [mtpDevice, setTransfers, setError]);
 
+    const uploadFiles = useCallback(async (fileList: FileList) => {
+        if (currentStorageId === null) return;
+
+        const filesToUpload = Array.from(fileList);
+        const folderHandles: Record<string, number> = {
+            "": currentParentHandle
+        };
+
+        for (const file of filesToUpload) {
+            const transferId = Math.random().toString(36).substring(7);
+            const newTransfer: FileTransfer = {
+                id: transferId,
+                filename: file.name,
+                loaded: 0,
+                total: file.size,
+                status: 'pending',
+                timestamp: Date.now(),
+                speed: 0,
+                direction: 'upload'
+            };
+
+            setTransfers(prev => [newTransfer, ...prev]);
+
+            try {
+                setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'uploading' } : t));
+
+                let parent = currentParentHandle;
+                const relativePath = file.webkitRelativePath;
+
+                if (relativePath) {
+                    const parts = relativePath.split('/');
+                    let currentPath = "";
+                    for (let i = 0; i < parts.length - 1; i++) {
+                        const folderName = parts[i];
+                        const parentPath = currentPath;
+                        currentPath = currentPath ? `${currentPath}/${folderName}` : folderName;
+
+                        if (!folderHandles[currentPath]) {
+                            const parentH = folderHandles[parentPath] || currentParentHandle;
+                            try {
+                                const newHandle = await mtpDevice.createFolder(folderName, parentH, currentStorageId);
+                                folderHandles[currentPath] = newHandle;
+                            } catch (e) {
+                                console.error(`Failed to create folder ${folderName}`, e);
+                                // Try to continue? Or abort?
+                                // If folder creation fails, we might fail to upload file.
+                                // Maybe the folder already exists? MTP doesn't return existing handle usually, it creates duplicate or errors.
+                                // We assume it succeeds or we catch error.
+                            }
+                        }
+                    }
+
+                    const fileParentPath = parts.slice(0, -1).join('/');
+                    if (folderHandles[fileParentPath]) {
+                        parent = folderHandles[fileParentPath];
+                    }
+                }
+
+                await mtpDevice.uploadFile(file, parent, currentStorageId, (sent, total) => {
+                    setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, loaded: sent, total } : t));
+                });
+
+                setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'completed', loaded: t.total } : t));
+            } catch (err: any) {
+                console.error(err);
+                setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'error', error: err.message } : t));
+            }
+        }
+
+        await loadFiles(currentStorageId, currentParentHandle);
+    }, [currentStorageId, currentParentHandle, loadFiles]);
+
     const filteredFiles = useMemo(() => files
         .filter(f => f.filename.toLowerCase().includes(searchQuery.toLowerCase()))
         .sort((a, b) => {
@@ -437,6 +501,7 @@ export function useMtp() {
         navigate,
         navigateUp,
         downloadFile,
+        uploadFiles,
         loadThumbnail,
         thumbnails,
         error,
