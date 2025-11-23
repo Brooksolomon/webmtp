@@ -233,71 +233,39 @@ export class MtpDevice {
         });
     }
 
-    async readFile(handle: number, onProgress?: (loaded: number, total: number) => void): Promise<Uint8Array> {
+    async readFile(handle: number, onProgress?: (loaded: number, total: number) => void, control?: { signal: AbortSignal, pause?: () => Promise<void> }): Promise<Uint8Array> {
         const info = await this.getObjectInfo(handle);
         const totalSize = info.compressedSize;
-
-        const tid = this.nextTransactionId();
-        const command = MtpPacket.createCommand(MtpOperationCode.GetObject, tid, [handle]);
-        await usbManager.transferOut(command);
-
-        // Read Data Header
-        const headerResult = await usbManager.transferIn(512);
-        if (!headerResult.data) throw new Error('No data received');
-
-        const headerContainer = MtpPacket.parseContainer(headerResult.data.buffer as ArrayBuffer);
-
-        if (headerContainer.type !== MtpContainerType.Data) {
-            if (headerContainer.type === MtpContainerType.Response) {
-                throw new Error(`Expected data, got response: ${headerContainer.code.toString(16)}`);
-            }
-            throw new Error(`Unexpected container type: ${headerContainer.type}`);
-        }
-
-        const totalLength = headerContainer.length; // Total MTP container length (header + data)
-        const dataLength = totalLength - 12; // Actual file size
-
-        // Verify size matches (mostly)
-        // Note: MTP length includes header. info.compressedSize is just file content.
-
-        const resultBuffer = new Uint8Array(dataLength);
+        const resultBuffer = new Uint8Array(totalSize);
         let offset = 0;
 
-        // Copy initial payload
-        const initialPayload = new Uint8Array(headerContainer.payload);
-        resultBuffer.set(initialPayload, offset);
-        offset += initialPayload.byteLength;
+        // Use 1MB chunks for GetPartialObject to allow interleaving other commands
+        const CHUNK_SIZE = 1024 * 1024;
 
-        if (onProgress) onProgress(offset, dataLength);
+        while (offset < totalSize) {
+            if (control?.signal.aborted) {
+                throw new Error('Transfer aborted');
+            }
 
-        // Read rest
-        // We'll read in chunks of 16KB or larger (WebUSB supports up to 1MB usually but depends on device)
-        const CHUNK_SIZE = 1024 * 128;
+            if (control?.pause) {
+                await control.pause();
+            }
 
-        while (offset < dataLength) {
-            const remaining = dataLength - offset;
+            const remaining = totalSize - offset;
             const readSize = Math.min(remaining, CHUNK_SIZE);
 
-            // Note: transferIn expects expected length.
-            // If we ask for more than available, it might wait or timeout?
-            // USB bulk transfer usually returns what is available up to length.
+            // GetPartialObject (0x101B) params: [Handle, Offset, BytesToRead]
+            // Note: This supports up to 4GB files. For larger files, we'd need 64-bit extension support.
+            const chunkBuffer = await this.performTransactionWithData(
+                MtpOperationCode.GetPartialObject,
+                [handle, offset, readSize]
+            );
 
-            const chunk = await usbManager.transferIn(readSize);
-            if (!chunk.data || chunk.data.byteLength === 0) break;
+            const chunk = new Uint8Array(chunkBuffer);
+            resultBuffer.set(chunk, offset);
+            offset += chunk.byteLength;
 
-            resultBuffer.set(new Uint8Array(chunk.data.buffer), offset);
-            offset += chunk.data.byteLength;
-
-            if (onProgress) onProgress(offset, dataLength);
-        }
-
-        // Read Response
-        const responseResult = await usbManager.transferIn(512);
-        if (responseResult.data) {
-            const responseContainer = MtpPacket.parseContainer(responseResult.data.buffer as ArrayBuffer);
-            if (responseContainer.code !== MtpResponseCode.OK) {
-                console.warn(`File read finished with non-OK status: ${responseContainer.code.toString(16)}`);
-            }
+            if (onProgress) onProgress(offset, totalSize);
         }
 
         return resultBuffer;

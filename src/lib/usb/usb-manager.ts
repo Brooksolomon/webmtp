@@ -41,6 +41,28 @@ export class UsbManager extends EventEmitter {
         }
     }
 
+    async autoConnect(): Promise<boolean> {
+        try {
+            const devices = await navigator.usb.getDevices();
+            if (devices.length > 0) {
+                console.log('Found previously paired devices:', devices);
+                // Try to connect to the first available device
+                // In a real app, we might want to check vendorId/productId or let user choose
+                for (const device of devices) {
+                    try {
+                        await this.connect(device);
+                        return true;
+                    } catch (err) {
+                        console.warn('Failed to auto-connect to device:', device.productName, err);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error during auto-connect:', error);
+        }
+        return false;
+    }
+
     async connect(device: USBDevice): Promise<void> {
         this.device = device;
 

@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { mtpDevice, MtpObjectInfo } from '@/lib/mtp/mtp-device';
 import { usbManager } from '@/lib/usb/usb-manager';
 import { MtpObjectFormat } from '@/lib/mtp/constants';
@@ -9,9 +9,10 @@ export interface FileTransfer {
     filename: string;
     loaded: number;
     total: number;
-    status: 'pending' | 'downloading' | 'completed' | 'error';
+    status: 'pending' | 'downloading' | 'completed' | 'error' | 'paused';
     error?: string;
     timestamp: number;
+    speed?: number; // bytes per second
 }
 
 export function useMtp() {
@@ -21,16 +22,31 @@ export function useMtp() {
     const [currentStorageId, setCurrentStorageId] = useState<number | null>(null);
     const [currentParentHandle, setCurrentParentHandle] = useState<number>(0xFFFFFFFF); // Root
     const [pathStack, setPathStack] = useState<{ handle: number, name: string }[]>([]);
+
+    // History for navigation
+    const [history, setHistory] = useState<{ handle: number, name: string }[][]>([[]]);
+    const [historyIndex, setHistoryIndex] = useState(0);
+
     const [error, setError] = useState<string | null>(null);
     const [isLoadingFiles, setIsLoadingFiles] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [sortBy, setSortBy] = useState<'name' | 'date' | 'size'>('name');
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+    const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
     const [transfers, setTransfers] = useState<FileTransfer[]>([]);
 
     const [thumbnails, setThumbnails] = useState<Record<number, string>>({});
 
     const loadedThumbnailsRef = useRef<Set<number>>(new Set());
+    const thumbnailQueueRef = useRef<MtpObjectInfo[]>([]);
+    const isProcessingQueueRef = useRef(false);
+
+    // Transfer controls
+    const transferControlsRef = useRef<Record<string, {
+        abortController: AbortController,
+        resume?: () => void,
+        isPaused: boolean
+    }>>({});
 
     useEffect(() => {
         const onConnected = () => setIsConnected(true);
@@ -38,6 +54,8 @@ export function useMtp() {
             setIsConnected(false);
             setFiles([]);
             setPathStack([]);
+            setHistory([[]]);
+            setHistoryIndex(0);
             setCurrentStorageId(null);
             setIsLoadingFiles(false);
             setThumbnails({});
@@ -47,10 +65,99 @@ export function useMtp() {
         usbManager.on('connected', onConnected);
         usbManager.on('disconnected', onDisconnected);
 
+        // Auto-connect on mount
+        usbManager.autoConnect().then(connected => {
+            if (connected) {
+                // If connected, we need to initialize session
+                connect();
+            }
+        });
+
+        // Listen for global USB connect events to trigger auto-connect
+        const handleUsbConnect = () => {
+            if (!usbManager.isConnected) {
+                usbManager.autoConnect().then(connected => {
+                    if (connected) connect();
+                });
+            }
+        };
+        navigator.usb.addEventListener('connect', handleUsbConnect);
+
         return () => {
             usbManager.off('connected', onConnected);
             usbManager.off('disconnected', onDisconnected);
+            navigator.usb.removeEventListener('connect', handleUsbConnect);
         };
+    }, []);
+
+    const processThumbnailQueue = useCallback(async () => {
+        if (isProcessingQueueRef.current) return;
+
+        // Don't process thumbnails if a download is active to prevent USB contention
+        // We check the ref directly if possible, but state is safer for React consistency.
+        // However, state might be stale in a closure? No, we use transfers in dependency.
+        // Actually, let's check the latest state via a functional update trick or just trust the dependency.
+        // But to be super safe and avoid stale closures in the async loop:
+
+        isProcessingQueueRef.current = true;
+
+        while (thumbnailQueueRef.current.length > 0) {
+            // Check if any transfer is downloading
+            const hasActiveDownload = await new Promise<boolean>(resolve => {
+                setTransfers(prev => {
+                    resolve(prev.some(t => t.status === 'downloading'));
+                    return prev;
+                });
+            });
+
+            if (hasActiveDownload) {
+                // Stop processing queue if download is active
+                break;
+            }
+
+            const file = thumbnailQueueRef.current.shift();
+            if (!file) continue;
+
+            try {
+                // Small delay to allow UI updates and prevent USB choking
+                await new Promise(resolve => setTimeout(resolve, 10));
+
+                const data = await mtpDevice.getThumbnail(file.handle);
+                if (data) {
+                    const blob = new Blob([data as unknown as BlobPart], { type: 'image/jpeg' });
+                    const url = URL.createObjectURL(blob);
+                    setThumbnails(prev => ({ ...prev, [file.handle]: url }));
+                }
+            } catch (err) {
+                console.warn(`Failed to load thumbnail for ${file.filename}`, err);
+            }
+        }
+
+        isProcessingQueueRef.current = false;
+    }, []);
+
+    // Trigger queue processing when transfers change (e.g. when all downloads finish)
+    useEffect(() => {
+        processThumbnailQueue();
+    }, [transfers, processThumbnailQueue]);
+
+
+    const pauseTransfer = useCallback((id: string) => {
+        if (transferControlsRef.current[id]) {
+            transferControlsRef.current[id].isPaused = true;
+            setTransfers(prev => prev.map(t => t.id === id ? { ...t, status: 'paused' } : t));
+        }
+    }, []);
+
+    const resumeTransfer = useCallback((id: string) => {
+        if (transferControlsRef.current[id]) {
+            transferControlsRef.current[id].isPaused = false;
+            if (transferControlsRef.current[id].resume) {
+                transferControlsRef.current[id].resume!();
+                transferControlsRef.current[id].resume = undefined;
+            }
+            setTransfers(prev => prev.map(t => t.id === id ? { ...t, status: 'downloading' } : t));
+        }
     }, []);
 
     const loadFiles = useCallback(async (storageId: number, parentHandle: number) => {
@@ -75,7 +182,9 @@ export function useMtp() {
         setIsConnecting(true);
         setError(null);
         try {
-            await mtpDevice.connect();
+            if (!usbManager.isConnected) {
+                await mtpDevice.connect();
+            }
             await mtpDevice.openSession();
 
             const storageIds = await mtpDevice.getStorageIds();
@@ -94,24 +203,24 @@ export function useMtp() {
     const navigate = useCallback(async (folder: MtpObjectInfo) => {
         if (folder.format !== MtpObjectFormat.Association) return;
         if (currentStorageId === null) return;
-
-        // Prevent navigating to the same folder if it's already the current one
         if (currentParentHandle === folder.handle) return;
 
         try {
-            setPathStack(prev => {
-                // Double check we aren't adding a duplicate at the end
-                if (prev.length > 0 && prev[prev.length - 1].handle === folder.handle) {
-                    return prev;
-                }
-                return [...prev, { handle: folder.handle, name: folder.filename }];
-            });
+            const newPath = [...pathStack, { handle: folder.handle, name: folder.filename }];
+
+            // Update history: remove forward history and push new state
+            const newHistory = history.slice(0, historyIndex + 1);
+            newHistory.push(newPath);
+
+            setHistory(newHistory);
+            setHistoryIndex(newHistory.length - 1);
+            setPathStack(newPath);
             setCurrentParentHandle(folder.handle);
             await loadFiles(currentStorageId, folder.handle);
         } catch (err) {
             console.error(err);
         }
-    }, [currentStorageId, loadFiles, currentParentHandle]);
+    }, [currentStorageId, loadFiles, currentParentHandle, pathStack, history, historyIndex]);
 
     const navigateUp = useCallback(async () => {
         if (pathStack.length === 0) return;
@@ -120,79 +229,58 @@ export function useMtp() {
         const newStack = pathStack.slice(0, -1);
         const newParent = newStack.length > 0 ? newStack[newStack.length - 1].handle : 0xFFFFFFFF;
 
+        // Treat as a new navigation state
+        const newHistory = history.slice(0, historyIndex + 1);
+        newHistory.push(newStack);
+
+        setHistory(newHistory);
+        setHistoryIndex(newHistory.length - 1);
         setPathStack(newStack);
         setCurrentParentHandle(newParent);
         await loadFiles(currentStorageId, newParent);
-    }, [pathStack, currentStorageId, loadFiles]);
+    }, [pathStack, currentStorageId, loadFiles, history, historyIndex]);
 
+    const goBack = useCallback(async () => {
+        if (historyIndex <= 0) return;
+        if (currentStorageId === null) return;
 
-    // Queue for thumbnail loading
-    const thumbnailQueueRef = useRef<MtpObjectInfo[]>([]);
-    const isProcessingQueueRef = useRef(false);
+        const newIndex = historyIndex - 1;
+        const newStack = history[newIndex];
+        const newParent = newStack.length > 0 ? newStack[newStack.length - 1].handle : 0xFFFFFFFF;
 
-    const processThumbnailQueue = useCallback(async () => {
-        if (isProcessingQueueRef.current) return;
-        isProcessingQueueRef.current = true;
+        setHistoryIndex(newIndex);
+        setPathStack(newStack);
+        setCurrentParentHandle(newParent);
+        await loadFiles(currentStorageId, newParent);
+    }, [history, historyIndex, currentStorageId, loadFiles]);
 
-        while (thumbnailQueueRef.current.length > 0) {
-            const file = thumbnailQueueRef.current.shift();
-            if (!file) continue;
+    const goForward = useCallback(async () => {
+        if (historyIndex >= history.length - 1) return;
+        if (currentStorageId === null) return;
 
-            try {
-                // Small delay to allow UI updates and prevent USB choking
-                await new Promise(resolve => setTimeout(resolve, 10));
+        const newIndex = historyIndex + 1;
+        const newStack = history[newIndex];
+        const newParent = newStack.length > 0 ? newStack[newStack.length - 1].handle : 0xFFFFFFFF;
 
-                const data = await mtpDevice.getThumbnail(file.handle);
-                if (data) {
-                    const blob = new Blob([data as unknown as BlobPart], { type: 'image/jpeg' });
-                    const url = URL.createObjectURL(blob);
-                    setThumbnails(prev => ({ ...prev, [file.handle]: url }));
-                }
-            } catch (err) {
-                console.warn(`Failed to load thumbnail for ${file.filename}`, err);
-            }
-        }
+        setHistoryIndex(newIndex);
+        setPathStack(newStack);
+        setCurrentParentHandle(newParent);
+        await loadFiles(currentStorageId, newParent);
+    }, [history, historyIndex, currentStorageId, loadFiles]);
 
-        isProcessingQueueRef.current = false;
-    }, []);
+    const goHome = useCallback(async () => {
+        if (currentStorageId === null) return;
 
-    const downloadFile = useCallback(async (file: MtpObjectInfo) => {
-        const transferId = Math.random().toString(36).substring(7);
-        const newTransfer: FileTransfer = {
-            id: transferId,
-            filename: file.filename,
-            loaded: 0,
-            total: file.compressedSize,
-            status: 'pending',
-            timestamp: Date.now()
-        };
+        const newStack: { handle: number, name: string }[] = [];
+        const newHistory = history.slice(0, historyIndex + 1);
+        newHistory.push(newStack);
 
-        setTransfers(prev => [newTransfer, ...prev]);
-
-        try {
-            setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'downloading' } : t));
-
-            const data = await mtpDevice.readFile(file.handle, (loaded, total) => {
-                setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, loaded, total } : t));
-            });
-
-            const blob = new Blob([data as unknown as BlobPart], { type: 'application/octet-stream' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = file.filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-
-            setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'completed', loaded: t.total } : t));
-        } catch (err: any) {
-            console.error(err);
-            setError(`Download failed: ${err.message}`);
-            setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'error', error: err.message } : t));
-        }
-    }, []);
+        setHistory(newHistory);
+        setHistoryIndex(newHistory.length - 1);
+        setPathStack(newStack);
+        setCurrentParentHandle(0xFFFFFFFF);
+        await loadFiles(currentStorageId, 0xFFFFFFFF);
+    }, [currentStorageId, loadFiles, history, historyIndex]);
 
     // Clear queue when search or sort changes to prioritize new visible items
     useEffect(() => {
@@ -224,7 +312,95 @@ export function useMtp() {
         processThumbnailQueue();
     }, [processThumbnailQueue, searchQuery, sortBy, sortOrder]);
 
-    const filteredFiles = files
+    const downloadFile = useCallback(async (file: MtpObjectInfo) => {
+        const transferId = Math.random().toString(36).substring(7);
+        const newTransfer: FileTransfer = {
+            id: transferId,
+            filename: file.filename,
+            loaded: 0,
+            total: file.compressedSize,
+            status: 'pending',
+            timestamp: Date.now(),
+            speed: 0
+        };
+
+        setTransfers(prev => [newTransfer, ...prev]);
+
+        const abortController = new AbortController();
+        transferControlsRef.current[transferId] = {
+            abortController,
+            isPaused: false
+        };
+
+        let lastLoaded = 0;
+        let lastTime = Date.now();
+
+        try {
+            setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'downloading' } : t));
+
+            const pauseCheck = async () => {
+                if (transferControlsRef.current[transferId]?.isPaused) {
+                    await new Promise<void>(resolve => {
+                        if (transferControlsRef.current[transferId]) {
+                            transferControlsRef.current[transferId].resume = resolve;
+                        }
+                    });
+                    // Reset speed calculation after pause
+                    lastTime = Date.now();
+                    // We don't reset lastLoaded because loaded is absolute.
+                    // But we need to make sure the next speed calc uses the correct delta.
+                    // The next callback will have a new 'loaded'.
+                    // If we just reset lastTime, the next timeDiff will be small, and bytesDiff will be (newLoaded - lastLoaded).
+                    // This is correct.
+                }
+            };
+
+            const data = await mtpDevice.readFile(
+                file.handle,
+                (loaded, total) => {
+                    const now = Date.now();
+                    const timeDiff = now - lastTime;
+
+                    if (timeDiff >= 1000) { // Update speed every second
+                        const bytesDiff = loaded - lastLoaded;
+                        const speed = (bytesDiff / timeDiff) * 1000; // bytes/sec
+
+                        setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, loaded, total, speed } : t));
+
+                        lastTime = now;
+                        lastLoaded = loaded;
+                    } else {
+                        // Just update progress without speed recalc to keep UI smooth but not jittery
+                        setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, loaded, total } : t));
+                    }
+                },
+                {
+                    signal: abortController.signal,
+                    pause: pauseCheck
+                }
+            );
+
+            const blob = new Blob([data as unknown as BlobPart], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = file.filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'completed', loaded: t.total, speed: 0 } : t));
+        } catch (err: any) {
+            console.error(err);
+            setError(`Download failed: ${err.message}`);
+            setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'error', error: err.message, speed: 0 } : t));
+        } finally {
+            delete transferControlsRef.current[transferId];
+        }
+    }, [mtpDevice, setTransfers, setError]);
+
+    const filteredFiles = useMemo(() => files
         .filter(f => f.filename.toLowerCase().includes(searchQuery.toLowerCase()))
         .sort((a, b) => {
             const aIsFolder = a.format === MtpObjectFormat.Association;
@@ -247,7 +423,10 @@ export function useMtp() {
             }
 
             return sortOrder === 'asc' ? comparison : -comparison;
-        });
+        }), [files, searchQuery, sortBy, sortOrder]);
+
+    const canGoBack = historyIndex > 0;
+    const canGoForward = historyIndex < history.length - 1;
 
     return {
         isConnected,
@@ -268,6 +447,15 @@ export function useMtp() {
         setSortBy,
         sortOrder,
         setSortOrder,
-        transfers
+        viewMode,
+        setViewMode,
+        transfers,
+        goBack,
+        goForward,
+        goHome,
+        canGoBack,
+        canGoForward,
+        pauseTransfer,
+        resumeTransfer
     };
 }
