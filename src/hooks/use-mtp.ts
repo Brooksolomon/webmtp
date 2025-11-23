@@ -342,51 +342,119 @@ export function useMtp() {
                             transferControlsRef.current[transferId].resume = resolve;
                         }
                     });
-                    // Reset speed calculation after pause
                     lastTime = Date.now();
                 }
             };
 
-            const data = await mtpDevice.readFile(
-                file.handle,
-                (loaded, total) => {
-                    const now = Date.now();
-                    const timeDiff = now - lastTime;
+            const onProgress = (loaded: number, total: number) => {
+                const now = Date.now();
+                const timeDiff = now - lastTime;
 
-                    if (timeDiff >= 1000) { // Update speed every second
-                        const bytesDiff = loaded - lastLoaded;
-                        const speed = (bytesDiff / timeDiff) * 1000; // bytes/sec
+                if (timeDiff >= 1000) {
+                    const bytesDiff = loaded - lastLoaded;
+                    const speed = (bytesDiff / timeDiff) * 1000;
 
-                        setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, loaded, total, speed } : t));
+                    setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, loaded, total, speed } : t));
 
-                        lastTime = now;
-                        lastLoaded = loaded;
-                    } else {
-                        // Just update progress without speed recalc to keep UI smooth but not jittery
-                        setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, loaded, total } : t));
-                    }
-                },
-                {
-                    signal: abortController.signal,
-                    pause: pauseCheck
+                    lastTime = now;
+                    lastLoaded = loaded;
+                } else {
+                    setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, loaded, total } : t));
                 }
-            );
+            };
 
-            const blob = new Blob([data as unknown as BlobPart], { type: 'application/octet-stream' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = file.filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            // Check for File System Access API support for large files
+            // @ts-ignore
+            if (window.showSaveFilePicker) {
+                try {
+                    // @ts-ignore
+                    const handle = await window.showSaveFilePicker({
+                        suggestedName: file.filename,
+                    });
+                    const writable = await handle.createWritable();
+                    const writer = writable.getWriter();
+
+                    try {
+                        await mtpDevice.readLargeFile(
+                            file.handle,
+                            file.compressedSize,
+                            writer,
+                            onProgress,
+                            {
+                                signal: abortController.signal,
+                                pause: pauseCheck
+                            }
+                        );
+
+                        writer.releaseLock();
+                        await writable.close();
+                    } catch (streamErr: any) {
+                        // If streaming fails, close the writer and fall back to memory download
+                        console.warn('Streaming download failed, falling back to memory download:', streamErr);
+                        try {
+                            writer.releaseLock();
+                            await writable.close();
+                        } catch (e) { /* ignore cleanup errors */ }
+
+                        // Fall back to memory-based download
+                        const data = await mtpDevice.readFile(
+                            file.handle,
+                            onProgress,
+                            {
+                                signal: abortController.signal,
+                                pause: pauseCheck
+                            }
+                        );
+
+                        const blob = new Blob([data as unknown as BlobPart], { type: 'application/octet-stream' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = file.filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                    }
+                } catch (err: any) {
+                    if (err.name === 'AbortError') {
+                        // User cancelled save dialog
+                        setTransfers(prev => prev.filter(t => t.id !== transferId));
+                        return;
+                    }
+                    throw err;
+                }
+            } else {
+                // Fallback to memory buffer
+                const data = await mtpDevice.readFile(
+                    file.handle,
+                    onProgress,
+                    {
+                        signal: abortController.signal,
+                        pause: pauseCheck
+                    }
+                );
+
+                const blob = new Blob([data as unknown as BlobPart], { type: 'application/octet-stream' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = file.filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
 
             setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'completed', loaded: t.total, speed: 0 } : t));
         } catch (err: any) {
             console.error(err);
-            setError(`Download failed: ${err.message}`);
-            setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'error', error: err.message, speed: 0 } : t));
+            if (err.message === 'Aborted' || err.message === 'Transfer aborted') {
+                setTransfers(prev => prev.filter(t => t.id !== transferId));
+            } else {
+                setError(`Download failed: ${err.message}`);
+                setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'error', error: err.message, speed: 0 } : t));
+            }
         } finally {
             delete transferControlsRef.current[transferId];
         }
@@ -415,8 +483,28 @@ export function useMtp() {
 
             setTransfers(prev => [newTransfer, ...prev]);
 
+            const abortController = new AbortController();
+            transferControlsRef.current[transferId] = {
+                abortController,
+                isPaused: false
+            };
+
+            let lastLoaded = 0;
+            let lastTime = Date.now();
+
             try {
                 setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'uploading' } : t));
+
+                const pauseCheck = async () => {
+                    if (transferControlsRef.current[transferId]?.isPaused) {
+                        await new Promise<void>(resolve => {
+                            if (transferControlsRef.current[transferId]) {
+                                transferControlsRef.current[transferId].resume = resolve;
+                            }
+                        });
+                        lastTime = Date.now();
+                    }
+                };
 
                 let parent = currentParentHandle;
                 const relativePath = file.webkitRelativePath;
@@ -436,10 +524,6 @@ export function useMtp() {
                                 folderHandles[currentPath] = newHandle;
                             } catch (e) {
                                 console.error(`Failed to create folder ${folderName}`, e);
-                                // Try to continue? Or abort?
-                                // If folder creation fails, we might fail to upload file.
-                                // Maybe the folder already exists? MTP doesn't return existing handle usually, it creates duplicate or errors.
-                                // We assume it succeeds or we catch error.
                             }
                         }
                     }
@@ -450,14 +534,42 @@ export function useMtp() {
                     }
                 }
 
-                await mtpDevice.uploadFile(file, parent, currentStorageId, (sent, total) => {
-                    setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, loaded: sent, total } : t));
-                });
+                await mtpDevice.uploadFile(
+                    file,
+                    parent,
+                    currentStorageId,
+                    (sent, total) => {
+                        const now = Date.now();
+                        const timeDiff = now - lastTime;
 
-                setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'completed', loaded: t.total } : t));
+                        if (timeDiff >= 1000) {
+                            const bytesDiff = sent - lastLoaded;
+                            const speed = (bytesDiff / timeDiff) * 1000;
+
+                            setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, loaded: sent, total, speed } : t));
+
+                            lastTime = now;
+                            lastLoaded = sent;
+                        } else {
+                            setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, loaded: sent, total } : t));
+                        }
+                    },
+                    {
+                        signal: abortController.signal,
+                        pause: pauseCheck
+                    }
+                );
+
+                setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'completed', loaded: t.total, speed: 0 } : t));
             } catch (err: any) {
                 console.error(err);
-                setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'error', error: err.message } : t));
+                if (err.message === 'Aborted') {
+                    setTransfers(prev => prev.filter(t => t.id !== transferId));
+                } else {
+                    setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'error', error: err.message, speed: 0 } : t));
+                }
+            } finally {
+                delete transferControlsRef.current[transferId];
             }
         }
 

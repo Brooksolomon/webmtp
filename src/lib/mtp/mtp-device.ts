@@ -376,9 +376,11 @@ export class MtpDevice {
         });
     }
 
-    async uploadFile(file: File, parentHandle: number, storageId: number, onProgress?: (sent: number, total: number) => void): Promise<void> {
+    async uploadFile(file: File, parentHandle: number, storageId: number, onProgress?: (sent: number, total: number) => void, control?: { signal: AbortSignal, pause?: () => Promise<void> }): Promise<void> {
         console.log(`Starting upload: ${file.name} (${file.size} bytes) to parent ${parentHandle}`);
         return this.runInLock(async () => {
+            if (control?.signal.aborted) throw new Error('Aborted');
+
             // 1. SendObjectInfo
             const objectInfo = this.createObjectInfo(file.name, file.size, MtpObjectFormat.Undefined, parentHandle, storageId);
             console.log(`Generated ObjectInfo: ${objectInfo.byteLength} bytes`);
@@ -414,6 +416,9 @@ export class MtpDevice {
             if (container1.code !== MtpResponseCode.OK) {
                 throw new Error(`Failed to send object info: ${container1.code.toString(16)}`);
             }
+
+            if (control?.signal.aborted) throw new Error('Aborted');
+            if (control?.pause) await control.pause();
 
             // 2. SendObject
             // MUST follow immediately
@@ -458,6 +463,9 @@ export class MtpDevice {
             let chunkCount = 1;
 
             while (offset < file.size) {
+                if (control?.signal.aborted) throw new Error('Aborted');
+                if (control?.pause) await control.pause();
+
                 const chunk = file.slice(offset, offset + CHUNK_SIZE);
                 const buffer = await chunk.arrayBuffer();
                 console.log(`Sending chunk ${chunkCount++}: ${buffer.byteLength} bytes (Offset: ${offset})`);
@@ -478,6 +486,36 @@ export class MtpDevice {
             }
             console.log('Upload complete');
         });
+    }
+
+    async readLargeFile(handle: number, totalSize: number, writer: WritableStreamDefaultWriter<Uint8Array>, onProgress?: (loaded: number, total: number) => void, control?: { signal: AbortSignal, pause?: () => Promise<void> }): Promise<void> {
+        let offset = 0;
+        const CHUNK_SIZE = 1024 * 1024; // 1MB
+
+        while (offset < totalSize) {
+            if (control?.signal.aborted) {
+                throw new Error('Transfer aborted');
+            }
+
+            if (control?.pause) {
+                await control.pause();
+            }
+
+            const remaining = totalSize - offset;
+            const readSize = Math.min(remaining, CHUNK_SIZE);
+
+            const chunkBuffer = await this.performTransactionWithData(
+                MtpOperationCode.GetPartialObject,
+                [handle, offset, readSize]
+            );
+
+            const chunk = new Uint8Array(chunkBuffer);
+            await writer.write(chunk);
+
+            offset += chunk.byteLength;
+
+            if (onProgress) onProgress(offset, totalSize);
+        }
     }
 
     async createFolder(name: string, parentHandle: number, storageId: number): Promise<number> {
