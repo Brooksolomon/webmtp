@@ -157,8 +157,8 @@ export default function Home() {
       <div className="relative z-40 h-16 border-b border-white/10 flex items-center px-6 justify-between bg-black/50 backdrop-blur-xl sticky top-0">
         <div className="flex items-center gap-4 flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-violet-600 flex items-center justify-center shadow-lg shadow-blue-900/20">
-              <Usb className="w-4 h-4 text-white" />
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center shadow-lg shadow-blue-900/20 overflow-hidden">
+              <img src="/logo.png" alt="WebMTP" className="w-full h-full object-cover" />
             </div>
             <span className="font-bold text-lg tracking-tight text-white hidden sm:block">WebMTP</span>
           </div>

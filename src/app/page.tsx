@@ -21,8 +21,8 @@ export default function LandingPage() {
       {/* Navbar */}
       <nav className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-8 py-4 flex justify-between items-center w-full max-w-5xl bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl shadow-lg shadow-black/20">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 rounded-xl flex items-center justify-center font-bold text-white shadow-lg shadow-purple-500/20 transition-transform hover:scale-110">
-            W
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center shadow-lg shadow-purple-500/20 transition-transform hover:scale-110 overflow-hidden">
+            <img src="/logo.png" alt="WebMTP" className="w-full h-full object-cover" />
           </div>
           <span className="font-bold text-lg tracking-tight bg-gradient-to-r from-white via-white/90 to-white/70 bg-clip-text text-transparent">
             WebMTP
