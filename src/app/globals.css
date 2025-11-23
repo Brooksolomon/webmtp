@@ -43,17 +43,25 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-* {
-  box-sizing: border-box;
+@layer utilities {
+  .animation-delay-200 {
+    animation-delay: 200ms;
+  }
 }
 
-/* Reset margin only for common elements, not all elements */
-body, h1, h2, h3, h4, h5, h6, p, figure, blockquote, dl, dd {
-  margin: 0;
-}
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
 
-*:not(button):not(input):not(select):not(textarea):not(a):not([role="button"]):not(.btn) {
-  padding: 0;
+  /* Reset margin only for common elements, not all elements */
+  body, h1, h2, h3, h4, h5, h6, p, figure, blockquote, dl, dd {
+    margin: 0;
+  }
+
+  *:not(button):not(input):not(select):not(textarea):not(a):not([role="button"]):not(.btn) {
+    padding: 0;
+  }
 }
 
 html,
