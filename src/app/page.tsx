@@ -2,16 +2,20 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
+import dynamic from "next/dynamic";
 import { ArrowRight, Smartphone, Zap, Shield } from "lucide-react";
 
 import { CardSpotlight } from "@/components/ui/card-spotlight";
-import { EncryptedText } from "@/components/ui/encrypted-text";
+const EncryptedText = dynamic(() => import("@/components/ui/encrypted-text").then(mod => ({ default: mod.EncryptedText })), {
+  ssr: false,
+});
 import { GitHubStarsButton } from '@/components/ui/shadcn-io/github-stars-button';
 
 
-export default function LandingPage() {
+export default function LandingPage() { 
   return (
-    <div className="min-h-screen bg-black text-white selection:bg-white/20 overflow-hidden">
+    <div className="min-h-screen bg-black text-white selection:bg-white/20 flex flex-col">
+      <div className="fixed inset-0 z-0 bg-black"></div>
       {/* Background Gradients */}
       <div className="fixed inset-0 z-0 pointer-events-none">
         <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-blue-500/20 rounded-full blur-[120px]" />
@@ -58,7 +62,7 @@ export default function LandingPage() {
         </div>
       </nav>
 
-      <main className="relative z-10 flex flex-col items-center justify-center min-h-screen px-4 sm:px-6 lg:px-8 pt-24">
+      <main className="relative z-10 flex-1 flex flex-col items-center px-4 sm:px-6 lg:px-8 pt-24">
         <GitHubStarsButton
           username="brooksolomon"
           repo="webmtp"
@@ -178,7 +182,7 @@ export default function LandingPage() {
         </motion.div>
       </main>
 
-      <footer className="absolute bottom-6 w-full text-center text-white/20 text-sm">
+      <footer className="w-full py-6 text-center text-white/20 text-sm relative z-10">
         <p>© {new Date().getFullYear()} WebMTP. Built with Next.js & WebUSB.</p>
       </footer>
     </div>
