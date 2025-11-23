@@ -36,6 +36,8 @@ export function useMtp() {
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
     const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
     const [transfers, setTransfers] = useState<FileTransfer[]>([]);
+    const [selectedFiles, setSelectedFiles] = useState<Set<number>>(new Set());
+    const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
 
     const [thumbnails, setThumbnails] = useState<Record<number, string>>({});
 
@@ -601,6 +603,116 @@ export function useMtp() {
             return sortOrder === 'asc' ? comparison : -comparison;
         }), [files, searchQuery, sortBy, sortOrder]);
 
+    const toggleFileSelection = useCallback((handle: number, index: number, event?: React.MouseEvent) => {
+        if (event?.shiftKey && lastSelectedIndex !== null) {
+            // Shift selection: select range
+            const start = Math.min(lastSelectedIndex, index);
+            const end = Math.max(lastSelectedIndex, index);
+            const newSelection = new Set(selectedFiles);
+            for (let i = start; i <= end; i++) {
+                if (filteredFiles[i]) {
+                    newSelection.add(filteredFiles[i].handle);
+                }
+            }
+            setSelectedFiles(newSelection);
+        } else if (event?.ctrlKey || event?.metaKey) {
+            // Ctrl/Cmd selection: toggle single item
+            const newSelection = new Set(selectedFiles);
+            if (newSelection.has(handle)) {
+                newSelection.delete(handle);
+            } else {
+                newSelection.add(handle);
+            }
+            setSelectedFiles(newSelection);
+            setLastSelectedIndex(index);
+        } else {
+            // Normal click: select only this item
+            setSelectedFiles(new Set([handle]));
+            setLastSelectedIndex(index);
+        }
+    }, [selectedFiles, lastSelectedIndex, filteredFiles]);
+
+    const clearSelection = useCallback(() => {
+        setSelectedFiles(new Set());
+        setLastSelectedIndex(null);
+    }, []);
+
+    const selectAll = useCallback(() => {
+        setSelectedFiles(new Set(filteredFiles.map(f => f.handle)));
+    }, [filteredFiles]);
+
+    const deleteSelected = useCallback(async () => {
+        if (currentStorageId === null) return;
+        
+        const handles = Array.from(selectedFiles);
+        if (handles.length === 0) return;
+
+        try {
+            for (const handle of handles) {
+                await mtpDevice.deleteObject(handle);
+            }
+            clearSelection();
+            await loadFiles(currentStorageId, currentParentHandle);
+        } catch (err: any) {
+            console.error(err);
+            setError(`Failed to delete: ${err.message}`);
+        }
+    }, [selectedFiles, currentStorageId, currentParentHandle, loadFiles, clearSelection]);
+
+    const renameFile = useCallback(async (handle: number, newName: string) => {
+        if (currentStorageId === null) return;
+        
+        try {
+            await mtpDevice.renameObject(handle, newName);
+            await loadFiles(currentStorageId, currentParentHandle);
+        } catch (err: any) {
+            console.error(err);
+            setError(`Failed to rename: ${err.message}`);
+        }
+    }, [currentStorageId, currentParentHandle, loadFiles]);
+
+    const moveFiles = useCallback(async (handles: number[], targetParentHandle: number) => {
+        if (currentStorageId === null) return;
+        
+        try {
+            for (const handle of handles) {
+                await mtpDevice.moveObject(handle, currentStorageId, targetParentHandle);
+            }
+            clearSelection();
+            await loadFiles(currentStorageId, currentParentHandle);
+        } catch (err: any) {
+            console.error(err);
+            setError(`Failed to move: ${err.message}`);
+        }
+    }, [currentStorageId, currentParentHandle, loadFiles, clearSelection]);
+
+    const copyFiles = useCallback(async (handles: number[], targetParentHandle: number) => {
+        if (currentStorageId === null) return;
+        
+        try {
+            for (const handle of handles) {
+                await mtpDevice.copyObject(handle, currentStorageId, targetParentHandle);
+            }
+            clearSelection();
+            await loadFiles(currentStorageId, currentParentHandle);
+        } catch (err: any) {
+            console.error(err);
+            setError(`Failed to copy: ${err.message}`);
+        }
+    }, [currentStorageId, currentParentHandle, loadFiles, clearSelection]);
+
+    const createNewFolder = useCallback(async (name: string) => {
+        if (currentStorageId === null) return;
+        
+        try {
+            await mtpDevice.createFolder(name, currentParentHandle, currentStorageId);
+            await loadFiles(currentStorageId, currentParentHandle);
+        } catch (err: any) {
+            console.error(err);
+            setError(`Failed to create folder: ${err.message}`);
+        }
+    }, [currentStorageId, currentParentHandle, loadFiles]);
+
     const canGoBack = historyIndex > 0;
     const canGoForward = historyIndex < history.length - 1;
 
@@ -633,6 +745,17 @@ export function useMtp() {
         canGoBack,
         canGoForward,
         pauseTransfer,
-        resumeTransfer
+        resumeTransfer,
+        selectedFiles,
+        toggleFileSelection,
+        clearSelection,
+        selectAll,
+        deleteSelected,
+        renameFile,
+        moveFiles,
+        copyFiles,
+        createNewFolder,
+        currentStorageId,
+        currentParentHandle
     };
 }

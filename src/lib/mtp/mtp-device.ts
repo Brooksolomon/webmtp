@@ -589,6 +589,72 @@ export class MtpDevice {
             return handle;
         });
     }
+
+    async deleteObject(handle: number): Promise<void> {
+        console.log(`Deleting object with handle: ${handle}`);
+        const response = await this.performTransaction(MtpOperationCode.DeleteObject, [handle]);
+        if (response.code !== MtpResponseCode.OK) {
+            throw new Error(`Failed to delete object: ${response.code.toString(16)}`);
+        }
+    }
+
+    async renameObject(handle: number, newName: string): Promise<void> {
+        console.log(`Renaming object ${handle} to: ${newName}`);
+        
+        // MTP Property Code for Object File Name is 0xDC07
+        const OBJECT_FILE_NAME_PROP = 0xDC07;
+        
+        const nameBytes = this.encodeString(newName);
+        
+        return this.runInLock(async () => {
+            const tid = this.nextTransactionId();
+            const command = MtpPacket.createCommand(MtpOperationCode.SetObjectPropValue, tid, [handle, OBJECT_FILE_NAME_PROP]);
+            await usbManager.transferOut(command);
+
+            // Send Data Header + String
+            const combinedSize = 12 + nameBytes.length;
+            const combinedBuffer = new Uint8Array(combinedSize);
+            const view = new DataView(combinedBuffer.buffer);
+
+            view.setUint32(0, combinedSize, true);
+            view.setUint16(4, MtpContainerType.Data, true);
+            view.setUint16(6, MtpOperationCode.SetObjectPropValue, true);
+            view.setUint32(8, tid, true);
+
+            combinedBuffer.set(nameBytes, 12);
+
+            await usbManager.transferOut(combinedBuffer);
+
+            // Read Response
+            const result = await usbManager.transferIn(512);
+            if (!result.data) throw new Error('No response received for SetObjectPropValue');
+            const container = MtpPacket.parseContainer(result.data.buffer as ArrayBuffer);
+            if (container.code !== MtpResponseCode.OK) {
+                throw new Error(`Failed to rename object: ${container.code.toString(16)}`);
+            }
+        });
+    }
+
+    async moveObject(handle: number, storageId: number, newParentHandle: number): Promise<void> {
+        console.log(`Moving object ${handle} to parent ${newParentHandle}`);
+        const response = await this.performTransaction(MtpOperationCode.MoveObject, [handle, storageId, newParentHandle]);
+        if (response.code !== MtpResponseCode.OK) {
+            throw new Error(`Failed to move object: ${response.code.toString(16)}`);
+        }
+    }
+
+    async copyObject(handle: number, storageId: number, newParentHandle: number): Promise<number> {
+        console.log(`Copying object ${handle} to parent ${newParentHandle}`);
+        const response = await this.performTransaction(MtpOperationCode.CopyObject, [handle, storageId, newParentHandle]);
+        if (response.code !== MtpResponseCode.OK) {
+            throw new Error(`Failed to copy object: ${response.code.toString(16)}`);
+        }
+        
+        // Response contains the new object handle
+        const view = new DataView(response.payload);
+        const newHandle = view.getUint32(0, true);
+        return newHandle;
+    }
 }
 
 export const mtpDevice = new MtpDevice();

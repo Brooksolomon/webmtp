@@ -2,7 +2,7 @@
 
 import { useMtp, FileTransfer } from '@/hooks/use-mtp';
 import { MtpObjectInfo } from '@/lib/mtp/mtp-device';
-import { Folder, File, ArrowLeft, Usb, HardDrive, Smartphone, Loader2, AlertCircle, Download, Search, Image as ImageIcon, Film, ArrowUp, ArrowDown, X, ChevronLeft, ChevronRight, Home as HomeIcon, Pause, Play, LayoutGrid, List, Upload, FolderPlus } from 'lucide-react';
+import { Folder, File, ArrowLeft, Usb, HardDrive, Smartphone, Loader2, AlertCircle, Download, Search, Image as ImageIcon, Film, ArrowUp, ArrowDown, X, ChevronLeft, ChevronRight, Home as HomeIcon, Pause, Play, LayoutGrid, List, Upload, FolderPlus, Trash2, Edit2, Copy, FolderInput, Check } from 'lucide-react';
 import { MtpObjectFormat } from '@/lib/mtp/constants';
 import clsx from 'clsx';
 import { useEffect, useRef, useState, memo } from 'react';
@@ -11,11 +11,54 @@ export default function Home() {
   const {
     isConnected, isConnecting, files, connect, navigate, navigateUp, downloadFile, uploadFiles, currentPath, error,
     isLoadingFiles, searchQuery, setSearchQuery, sortBy, setSortBy, loadThumbnail, thumbnails, sortOrder, setSortOrder, transfers,
-    goBack, goForward, goHome, canGoBack, canGoForward, pauseTransfer, resumeTransfer, viewMode, setViewMode
+    goBack, goForward, goHome, canGoBack, canGoForward, pauseTransfer, resumeTransfer, viewMode, setViewMode,
+    selectedFiles, toggleFileSelection, clearSelection, selectAll, deleteSelected, renameFile, moveFiles, copyFiles,
+    createNewFolder, currentStorageId, currentParentHandle
   } = useMtp();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  
+  const [showRenameDialog, setShowRenameDialog] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<MtpObjectInfo | null>(null);
+  const [newName, setNewName] = useState('');
+  
+  const [showCreateFolderDialog, setShowCreateFolderDialog] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  
+  const [dragOver, setDragOver] = useState<number | null>(null);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isConnected) return;
+      
+      // Ctrl/Cmd + A - Select All
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+        e.preventDefault();
+        selectAll();
+      }
+      
+      // Delete key - Delete selected
+      if (e.key === 'Delete' && selectedFiles.size > 0) {
+        e.preventDefault();
+        deleteSelected();
+      }
+      
+      // Escape - Clear selection
+      if (e.key === 'Escape') {
+        clearSelection();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isConnected, selectAll, deleteSelected, clearSelection, selectedFiles.size]);
+
+  // Clear selection when navigating
+  useEffect(() => {
+    clearSelection();
+  }, [currentPath, clearSelection]);
 
   return (
     <main className="min-h-screen bg-neutral-950 text-neutral-200 font-sans selection:bg-blue-500/30">
@@ -95,9 +138,59 @@ export default function Home() {
           )}
         </div>
 
+        {/* File Operations Toolbar */}
+        {isConnected && selectedFiles.size > 0 && (
+          <div className="flex items-center gap-2 bg-neutral-900 px-3 py-1.5 rounded-lg border border-neutral-800">
+            <span className="text-xs text-neutral-400">{selectedFiles.size} selected</span>
+            <div className="h-4 w-px bg-neutral-800" />
+            <button
+              onClick={() => deleteSelected()}
+              className="p-1.5 rounded-md hover:bg-red-500/10 text-red-400 hover:text-red-300 transition-colors"
+              title="Delete Selected"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+            {selectedFiles.size === 1 && (
+              <button
+                onClick={() => {
+                  const file = files.find(f => selectedFiles.has(f.handle));
+                  if (file) {
+                    setRenameTarget(file);
+                    setNewName(file.filename);
+                    setShowRenameDialog(true);
+                  }
+                }}
+                className="p-1.5 rounded-md hover:bg-neutral-700 text-neutral-400 hover:text-white transition-colors"
+                title="Rename"
+              >
+                <Edit2 className="w-4 h-4" />
+              </button>
+            )}
+            <button
+              onClick={clearSelection}
+              className="p-1.5 rounded-md hover:bg-neutral-700 text-neutral-400 hover:text-white transition-colors"
+              title="Clear Selection"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Search & Sort & Upload */}
         {isConnected && (
           <div className="flex items-center gap-3">
+            {/* Create Folder Button */}
+            <button
+              onClick={() => setShowCreateFolderDialog(true)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium text-neutral-400 hover:text-white hover:bg-neutral-800 transition-all flex items-center gap-2 border border-neutral-800"
+              title="Create Folder"
+            >
+              <FolderPlus className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">New Folder</span>
+            </button>
+
+            <div className="h-6 w-px bg-neutral-800" />
+
             {/* Upload Controls */}
             <div className="flex items-center gap-1 bg-neutral-900 p-1 rounded-lg border border-neutral-800">
               <input
@@ -274,15 +367,38 @@ export default function Home() {
                   ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4"
                   : "flex flex-col gap-1"
               )}>
-                {files.map((file) => (
+                {files.map((file, index) => (
                   <FileItem
                     key={file.handle}
                     file={file}
+                    index={index}
                     onNavigate={navigate}
                     onDownload={downloadFile}
                     loadThumbnail={loadThumbnail}
                     thumbnailUrl={thumbnails[file.handle]}
                     viewMode={viewMode}
+                    isSelected={selectedFiles.has(file.handle)}
+                    onSelect={toggleFileSelection}
+                    onDragStart={() => {
+                      if (!selectedFiles.has(file.handle)) {
+                        toggleFileSelection(file.handle, index);
+                      }
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      if (file.format === MtpObjectFormat.Association) {
+                        setDragOver(file.handle);
+                      }
+                    }}
+                    onDragLeave={() => setDragOver(null)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setDragOver(null);
+                      if (file.format === MtpObjectFormat.Association && selectedFiles.size > 0) {
+                        moveFiles(Array.from(selectedFiles), file.handle);
+                      }
+                    }}
+                    isDragOver={dragOver === file.handle}
                   />
                 ))}
               </div>
@@ -291,19 +407,130 @@ export default function Home() {
         )}
       </div>
       <TransferBubble transfers={transfers} onPause={pauseTransfer} onResume={resumeTransfer} />
+      
+      {/* Rename Dialog */}
+      {showRenameDialog && renameTarget && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowRenameDialog(false)}>
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-xl font-bold text-white mb-4">Rename</h2>
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10"
+              placeholder="Enter new name"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newName.trim()) {
+                  renameFile(renameTarget.handle, newName);
+                  setShowRenameDialog(false);
+                  setRenameTarget(null);
+                } else if (e.key === 'Escape') {
+                  setShowRenameDialog(false);
+                  setRenameTarget(null);
+                }
+              }}
+            />
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowRenameDialog(false);
+                  setRenameTarget(null);
+                }}
+                className="flex-1 px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (newName.trim()) {
+                    renameFile(renameTarget.handle, newName);
+                    setShowRenameDialog(false);
+                    setRenameTarget(null);
+                  }
+                }}
+                disabled={!newName.trim()}
+                className="flex-1 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Rename
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Folder Dialog */}
+      {showCreateFolderDialog && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowCreateFolderDialog(false)}>
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-xl font-bold text-white mb-4">Create Folder</h2>
+            <input
+              type="text"
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10"
+              placeholder="Enter folder name"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newFolderName.trim()) {
+                  createNewFolder(newFolderName);
+                  setShowCreateFolderDialog(false);
+                  setNewFolderName('');
+                } else if (e.key === 'Escape') {
+                  setShowCreateFolderDialog(false);
+                  setNewFolderName('');
+                }
+              }}
+            />
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowCreateFolderDialog(false);
+                  setNewFolderName('');
+                }}
+                className="flex-1 px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (newFolderName.trim()) {
+                    createNewFolder(newFolderName);
+                    setShowCreateFolderDialog(false);
+                    setNewFolderName('');
+                  }
+                }}
+                disabled={!newFolderName.trim()}
+                className="flex-1 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
 
 const FileItem = memo(function FileItem({
-  file, onNavigate, onDownload, loadThumbnail, thumbnailUrl, viewMode
+  file, index, onNavigate, onDownload, loadThumbnail, thumbnailUrl, viewMode, isSelected, onSelect,
+  onDragStart, onDragOver, onDragLeave, onDrop, isDragOver
 }: {
   file: MtpObjectInfo,
+  index: number,
   onNavigate: (file: MtpObjectInfo) => void,
   onDownload: (file: MtpObjectInfo) => void,
   loadThumbnail: (file: MtpObjectInfo) => void,
   thumbnailUrl?: string,
-  viewMode: 'list' | 'grid'
+  viewMode: 'list' | 'grid',
+  isSelected: boolean,
+  onSelect: (handle: number, index: number, event?: React.MouseEvent) => void,
+  onDragStart: () => void,
+  onDragOver: (e: React.DragEvent) => void,
+  onDragLeave: () => void,
+  onDrop: (e: React.DragEvent) => void,
+  isDragOver: boolean
 }) {
   const elRef = useRef<HTMLButtonElement>(null);
 
@@ -349,8 +576,10 @@ const FileItem = memo(function FileItem({
   const isImage = isImageFormat || isImageExt;
   const isVideo = isVideoFormat || isVideoExt;
 
-  const handleClick = () => {
-    if (isFolder) {
+  const handleClick = (e: React.MouseEvent) => {
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      onSelect(file.handle, index, e);
+    } else if (isFolder) {
       onNavigate(file);
     } else {
       onDownload(file);
@@ -362,7 +591,18 @@ const FileItem = memo(function FileItem({
       <button
         ref={elRef}
         onClick={handleClick}
-        className="group flex flex-col items-center gap-3 p-4 rounded-2xl hover:bg-neutral-800/50 transition-all text-center border border-transparent hover:border-neutral-700/50 aspect-square justify-center relative overflow-hidden"
+        draggable
+        onDragStart={onDragStart}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        className={clsx(
+          "group flex flex-col items-center gap-3 p-4 rounded-2xl transition-all text-center border relative overflow-hidden aspect-square justify-center",
+          isSelected 
+            ? "bg-blue-500/20 border-blue-500/50 hover:bg-blue-500/30" 
+            : "border-transparent hover:border-neutral-700/50 hover:bg-neutral-800/50",
+          isDragOver && "ring-2 ring-blue-500 bg-blue-500/10"
+        )}
       >
         <div className={clsx(
           "w-16 h-16 rounded-2xl flex items-center justify-center shrink-0 transition-colors overflow-hidden shadow-lg",
@@ -370,6 +610,11 @@ const FileItem = memo(function FileItem({
             ? "bg-yellow-500/10 text-yellow-500 group-hover:bg-yellow-500/20"
             : "bg-blue-500/10 text-blue-500 group-hover:bg-blue-500/20"
         )}>
+          {isSelected && (
+            <div className="absolute top-1 left-1 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center z-10">
+              <Check className="w-3 h-3 text-white" />
+            </div>
+          )}
           {isFolder ? (
             <Folder className="w-8 h-8 fill-current" />
           ) : isImage ? (
@@ -415,14 +660,30 @@ const FileItem = memo(function FileItem({
     <button
       ref={elRef}
       onClick={handleClick}
-      className="group flex items-start gap-3 p-3 rounded-xl hover:bg-neutral-800/50 transition-all text-left border border-transparent hover:border-neutral-700/50"
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={clsx(
+        "group flex items-start gap-3 p-3 rounded-xl transition-all text-left border",
+        isSelected 
+          ? "bg-blue-500/20 border-blue-500/50 hover:bg-blue-500/30" 
+          : "border-transparent hover:border-neutral-700/50 hover:bg-neutral-800/50",
+        isDragOver && "ring-2 ring-blue-500 bg-blue-500/10"
+      )}
     >
       <div className={clsx(
-        "w-10 h-10 rounded-lg flex items-center justify-center shrink-0 transition-colors overflow-hidden",
+        "w-10 h-10 rounded-lg flex items-center justify-center shrink-0 transition-colors overflow-hidden relative",
         isFolder
           ? "bg-yellow-500/10 text-yellow-500 group-hover:bg-yellow-500/20"
           : "bg-blue-500/10 text-blue-500 group-hover:bg-blue-500/20"
       )}>
+        {isSelected && (
+          <div className="absolute top-0 left-0 w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center z-10">
+            <Check className="w-2.5 h-2.5 text-white" />
+          </div>
+        )}
         {isFolder ? (
           <Folder className="w-5 h-5 fill-current" />
         ) : isImage ? (
