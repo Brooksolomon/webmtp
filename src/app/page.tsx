@@ -5,7 +5,7 @@ import { MtpObjectInfo, mtpDevice } from '@/lib/mtp/mtp-device';
 import { formatMtpDate } from '@/utils/format';
 import { MtpObjectFormat } from '@/lib/mtp/constants';
 import clsx from 'clsx';
-import { useEffect, useRef, useState, memo } from 'react';
+import { useEffect, useRef, useState, memo, useCallback } from 'react';
 import { 
   Usb, 
   ChevronLeft, 
@@ -67,6 +67,8 @@ export default function Home() {
   const [dragSelectStart, setDragSelectStart] = useState<{ x: number; y: number } | null>(null);
   const [dragSelectEnd, setDragSelectEnd] = useState<{ x: number; y: number } | null>(null);
   const fileListRef = useRef<HTMLDivElement>(null);
+  
+  const [isDragOver, setIsDragOver] = useState(false);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -104,6 +106,37 @@ export default function Home() {
       window.removeEventListener('click', handleClick);
     };
   }, [isConnected, selectAll, deleteSelected, clearSelection, selectedFiles.size]);
+
+  // Drag and drop handlers
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isDragOver) {
+      setIsDragOver(true);
+    }
+  }, [isDragOver]);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only set drag over to false if we're leaving the main container
+    if (e.currentTarget === e.target) {
+      setIsDragOver(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    
+    if (!isConnected) return;
+    
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      await uploadFiles(files);
+    }
+  }, [isConnected, uploadFiles]);
 
   // Clear selection when navigating
   useEffect(() => {
@@ -396,7 +429,12 @@ export default function Home() {
             )}
           </div>
         ) : (
-          <div className="space-y-2 pb-20">
+          <div 
+            className="space-y-2 pb-20 relative"
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
             {/* Back Button (Mobile/Small screens or just general convenience) */}
             {currentPath.length > 0 && (
               <button
@@ -501,6 +539,19 @@ export default function Home() {
                     }}
                   />
                 )}
+              </div>
+            )}
+            
+            {/* Drag and Drop Overlay */}
+            {isDragOver && (
+              <div className="absolute inset-0 bg-blue-500/10 border-2 border-dashed border-blue-500 rounded-lg flex items-center justify-center z-10 pointer-events-none">
+                <div className="text-center space-y-3">
+                  <Upload className="w-16 h-16 text-blue-500 mx-auto animate-bounce" />
+                  <div className="space-y-1">
+                    <p className="text-lg font-semibold text-blue-400">Drop files to upload</p>
+                    <p className="text-sm text-blue-300/70">Release to start uploading to current folder</p>
+                  </div>
+                </div>
               </div>
             )}
           </div>
