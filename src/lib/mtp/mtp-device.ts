@@ -237,25 +237,25 @@ export class MtpDevice {
         if (control?.signal.aborted) {
             throw new Error('Transfer aborted');
         }
-        
+
         const info = await this.getObjectInfo(handle);
         const totalSize = info.compressedSize;
-        
+
         // Check for abort again after getting info
         if (control?.signal.aborted) {
             throw new Error('Transfer aborted');
         }
-        
+
         // Add safety check for extremely large files that might cause memory issues
         if (totalSize > 4 * 1024 * 1024 * 1024) { // 4GB limit
             throw new Error('File too large for memory-based download');
         }
-        
+
         const resultBuffer = new Uint8Array(totalSize);
         let offset = 0;
 
-        // Use 1MB chunks for GetPartialObject to allow interleaving other commands
-        const CHUNK_SIZE = 1024 * 1024;
+        // Use 8MB chunks for GetPartialObject to reduce round-trip overhead
+        const CHUNK_SIZE = 4 * 1024 * 1024;
 
         while (offset < totalSize) {
             if (control?.signal.aborted) {
@@ -444,13 +444,13 @@ export class MtpDevice {
             await usbManager.transferOut(command2);
 
             // Send Data Header + First Chunk
-            const CHUNK_SIZE = 1024 * 1024 * 1; // 1MB chunks
+            const CHUNK_SIZE = 4 * 1024 * 1024; // 8MB chunks
 
             // We need to ensure that if we are sending multiple chunks, the first transfer (Header + Chunk)
             // is a multiple of the USB Max Packet Size (512 bytes).
             // Otherwise, a short packet (remainder) might be interpreted by the USB controller as End of Transfer.
             // Header is 12 bytes.
-            // If we use CHUNK_SIZE (1MB) as the total first transfer size, it is aligned (1024*1024 % 512 === 0).
+            // If we use CHUNK_SIZE (8MB) as the total first transfer size, it is aligned (8*1024*1024 % 512 === 0).
             // So the data part should be CHUNK_SIZE - 12.
 
             const firstChunkSize = Math.min(file.size, CHUNK_SIZE - 12);
@@ -471,22 +471,49 @@ export class MtpDevice {
             combinedBuffer.set(new Uint8Array(firstChunkBuffer), 12);
 
             console.log(`Sending combined header + first chunk: ${combinedSize} bytes`);
+
+            // Start reading the next chunk BEFORE we send the current one (Pipeline)
+            let offset = firstChunkSize;
+            let nextChunkPromise: Promise<ArrayBuffer> | null = null;
+
+            if (offset < file.size) {
+                const nextChunkSize = Math.min(file.size - offset, CHUNK_SIZE);
+                nextChunkPromise = file.slice(offset, offset + nextChunkSize).arrayBuffer();
+            }
+
             await usbManager.transferOut(combinedBuffer);
 
             if (onProgress) onProgress(firstChunkSize, file.size);
 
-            let offset = firstChunkSize;
             let chunkCount = 1;
 
             while (offset < file.size) {
                 if (control?.signal.aborted) throw new Error('Aborted');
                 if (control?.pause) await control.pause();
 
-                const chunk = file.slice(offset, offset + CHUNK_SIZE);
-                const buffer = await chunk.arrayBuffer();
+                // Wait for the chunk we started reading previously
+                if (!nextChunkPromise) {
+                    // Should not happen if logic is correct, but fallback
+                    const chunkSize = Math.min(file.size - offset, CHUNK_SIZE);
+                    nextChunkPromise = file.slice(offset, offset + chunkSize).arrayBuffer();
+                }
+
+                const buffer = await nextChunkPromise;
+                const currentChunkSize = buffer.byteLength;
+
+                // Start reading the NEXT chunk immediately
+                const nextOffset = offset + currentChunkSize;
+                if (nextOffset < file.size) {
+                    const nextSize = Math.min(file.size - nextOffset, CHUNK_SIZE);
+                    nextChunkPromise = file.slice(nextOffset, nextOffset + nextSize).arrayBuffer();
+                } else {
+                    nextChunkPromise = null;
+                }
+
                 console.log(`Sending chunk ${chunkCount++}: ${buffer.byteLength} bytes (Offset: ${offset})`);
                 await usbManager.transferOut(buffer);
-                offset += buffer.byteLength;
+
+                offset += currentChunkSize;
                 if (onProgress) onProgress(offset, file.size);
             }
 
@@ -506,10 +533,14 @@ export class MtpDevice {
 
     async readLargeFile(handle: number, totalSize: number, writer: WritableStreamDefaultWriter<Uint8Array>, onProgress?: (loaded: number, total: number) => void, control?: { signal: AbortSignal, pause?: () => Promise<void> }): Promise<void> {
         let offset = 0;
-        const CHUNK_SIZE = 1024 * 1024; // 1MB
+        const CHUNK_SIZE = 4 * 1024 * 1024; // 8MB
+
+        let previousWritePromise = Promise.resolve();
 
         while (offset < totalSize) {
             if (control?.signal.aborted) {
+                // Ensure we wait for any pending write before throwing
+                await previousWritePromise.catch(() => { });
                 throw new Error('Transfer aborted');
             }
 
@@ -520,18 +551,28 @@ export class MtpDevice {
             const remaining = totalSize - offset;
             const readSize = Math.min(remaining, CHUNK_SIZE);
 
+            // 1. Fetch from USB
             const chunkBuffer = await this.performTransactionWithData(
                 MtpOperationCode.GetPartialObject,
                 [handle, offset, readSize]
             );
 
+            // 2. Wait for previous write to complete
+            // This ensures we don't buffer too much in memory if disk is slow,
+            // but allows parallelism if disk is fast enough.
+            await previousWritePromise;
+
+            // 3. Start writing current chunk in background
             const chunk = new Uint8Array(chunkBuffer);
-            await writer.write(chunk);
+            previousWritePromise = writer.write(chunk);
 
             offset += chunk.byteLength;
 
             if (onProgress) onProgress(offset, totalSize);
         }
+
+        // Ensure the last chunk is written
+        await previousWritePromise;
     }
 
     async createFolder(name: string, parentHandle: number, storageId: number): Promise<number> {
@@ -616,12 +657,12 @@ export class MtpDevice {
 
     async renameObject(handle: number, newName: string): Promise<void> {
         console.log(`Renaming object ${handle} to: ${newName}`);
-        
+
         // MTP Property Code for Object File Name is 0xDC07
         const OBJECT_FILE_NAME_PROP = 0xDC07;
-        
+
         const nameBytes = this.encodeString(newName);
-        
+
         return this.runInLock(async () => {
             const tid = this.nextTransactionId();
             const command = MtpPacket.createCommand(MtpOperationCode.SetObjectPropValue, tid, [handle, OBJECT_FILE_NAME_PROP]);
@@ -665,7 +706,7 @@ export class MtpDevice {
         if (response.code !== MtpResponseCode.OK) {
             throw new Error(`Failed to copy object: ${response.code.toString(16)}`);
         }
-        
+
         // Response contains the new object handle
         const view = new DataView(response.payload);
         const newHandle = view.getUint32(0, true);
