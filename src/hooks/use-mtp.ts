@@ -713,6 +713,15 @@ export function useMtp() {
         }
     }, [currentStorageId, currentParentHandle, loadFiles]);
 
+    const downloadMultiple = useCallback(async (handles: number[]) => {
+        for (const handle of handles) {
+            const file = files.find(f => f.handle === handle);
+            if (file && file.format !== MtpObjectFormat.Association) {
+                await downloadFile(file);
+            }
+        }
+    }, [files, downloadFile]);
+
     const canGoBack = historyIndex > 0;
     const canGoForward = historyIndex < history.length - 1;
 
@@ -755,7 +764,9 @@ export function useMtp() {
         moveFiles,
         copyFiles,
         createNewFolder,
+        downloadMultiple,
         currentStorageId,
-        currentParentHandle
+        currentParentHandle,
+        loadFiles
     };
 }

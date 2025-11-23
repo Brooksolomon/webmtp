@@ -1,11 +1,41 @@
 'use client';
 
 import { useMtp, FileTransfer } from '@/hooks/use-mtp';
-import { MtpObjectInfo } from '@/lib/mtp/mtp-device';
-import { Folder, File, ArrowLeft, Usb, HardDrive, Smartphone, Loader2, AlertCircle, Download, Search, Image as ImageIcon, Film, ArrowUp, ArrowDown, X, ChevronLeft, ChevronRight, Home as HomeIcon, Pause, Play, LayoutGrid, List, Upload, FolderPlus, Trash2, Edit2, Copy, FolderInput, Check } from 'lucide-react';
+import { MtpObjectInfo, mtpDevice } from '@/lib/mtp/mtp-device';
+import { formatMtpDate } from '@/utils/format';
 import { MtpObjectFormat } from '@/lib/mtp/constants';
 import clsx from 'clsx';
 import { useEffect, useRef, useState, memo } from 'react';
+import { 
+  Usb, 
+  ChevronLeft, 
+  ChevronRight, 
+  Home as HomeIcon, 
+  HardDrive, 
+  Download, 
+  Trash2, 
+  Edit2, 
+  X, 
+  FolderPlus, 
+  Upload, 
+  Search, 
+  LayoutGrid, 
+  List, 
+  ArrowUp, 
+  ArrowDown, 
+  Smartphone, 
+  Loader2, 
+  AlertCircle, 
+  ArrowLeft, 
+  Folder, 
+  FolderInput, 
+  Check, 
+  Play, 
+  Pause, 
+  Image as ImageIcon,
+  Film,
+  File as FileIcon
+} from 'lucide-react';
 
 export default function Home() {
   const {
@@ -13,7 +43,7 @@ export default function Home() {
     isLoadingFiles, searchQuery, setSearchQuery, sortBy, setSortBy, loadThumbnail, thumbnails, sortOrder, setSortOrder, transfers,
     goBack, goForward, goHome, canGoBack, canGoForward, pauseTransfer, resumeTransfer, viewMode, setViewMode,
     selectedFiles, toggleFileSelection, clearSelection, selectAll, deleteSelected, renameFile, moveFiles, copyFiles,
-    createNewFolder, currentStorageId, currentParentHandle
+    createNewFolder, downloadMultiple, currentStorageId, currentParentHandle, loadFiles
   } = useMtp();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -27,6 +57,16 @@ export default function Home() {
   const [newFolderName, setNewFolderName] = useState('');
   
   const [dragOver, setDragOver] = useState<number | null>(null);
+  
+  const [showDetailsPanel, setShowDetailsPanel] = useState(false);
+  const [detailsFile, setDetailsFile] = useState<MtpObjectInfo | null>(null);
+  
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; file: MtpObjectInfo | null } | null>(null);
+  
+  const [isDragSelecting, setIsDragSelecting] = useState(false);
+  const [dragSelectStart, setDragSelectStart] = useState<{ x: number; y: number } | null>(null);
+  const [dragSelectEnd, setDragSelectEnd] = useState<{ x: number; y: number } | null>(null);
+  const fileListRef = useRef<HTMLDivElement>(null);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -45,14 +85,24 @@ export default function Home() {
         deleteSelected();
       }
       
-      // Escape - Clear selection
+      // Escape - Clear selection, close menus
       if (e.key === 'Escape') {
+        setContextMenu(null);
+        setShowDetailsPanel(false);
         clearSelection();
       }
     };
     
+    const handleClick = () => {
+      setContextMenu(null);
+    };
+    
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('click', handleClick);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('click', handleClick);
+    };
   }, [isConnected, selectAll, deleteSelected, clearSelection, selectedFiles.size]);
 
   // Clear selection when navigating
@@ -143,6 +193,13 @@ export default function Home() {
           <div className="flex items-center gap-2 bg-neutral-900 px-3 py-1.5 rounded-lg border border-neutral-800">
             <span className="text-xs text-neutral-400">{selectedFiles.size} selected</span>
             <div className="h-4 w-px bg-neutral-800" />
+            <button
+              onClick={() => downloadMultiple(Array.from(selectedFiles))}
+              className="p-1.5 rounded-md hover:bg-blue-500/10 text-blue-400 hover:text-blue-300 transition-colors"
+              title="Download Selected"
+            >
+              <Download className="w-4 h-4" />
+            </button>
             <button
               onClick={() => deleteSelected()}
               className="p-1.5 rounded-md hover:bg-red-500/10 text-red-400 hover:text-red-300 transition-colors"
@@ -362,11 +419,33 @@ export default function Home() {
                 <p>No files found</p>
               </div>
             ) : (
-              <div className={clsx(
-                viewMode === 'grid'
-                  ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4"
-                  : "flex flex-col gap-1"
-              )}>
+              <div 
+                ref={fileListRef}
+                className={clsx(
+                  "relative",
+                  viewMode === 'grid'
+                    ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4"
+                    : "flex flex-col gap-1"
+                )}
+                onMouseDown={(e) => {
+                  if (e.button === 0 && !e.shiftKey && !e.ctrlKey && !e.metaKey && e.target === e.currentTarget) {
+                    setIsDragSelecting(true);
+                    setDragSelectStart({ x: e.clientX, y: e.clientY });
+                    setDragSelectEnd({ x: e.clientX, y: e.clientY });
+                    clearSelection();
+                  }
+                }}
+                onMouseMove={(e) => {
+                  if (isDragSelecting && dragSelectStart) {
+                    setDragSelectEnd({ x: e.clientX, y: e.clientY });
+                  }
+                }}
+                onMouseUp={() => {
+                  setIsDragSelecting(false);
+                  setDragSelectStart(null);
+                  setDragSelectEnd(null);
+                }}
+              >
                 {files.map((file, index) => (
                   <FileItem
                     key={file.handle}
@@ -379,7 +458,15 @@ export default function Home() {
                     viewMode={viewMode}
                     isSelected={selectedFiles.has(file.handle)}
                     onSelect={toggleFileSelection}
-                    onDragStart={() => {
+                    onShowDetails={(file) => {
+                      setDetailsFile(file);
+                      setShowDetailsPanel(true);
+                    }}
+                    onContextMenu={(e, file) => {
+                      e.preventDefault();
+                      setContextMenu({ x: e.clientX, y: e.clientY, file });
+                    }}
+                    onFileDragStart={() => {
                       if (!selectedFiles.has(file.handle)) {
                         toggleFileSelection(file.handle, index);
                       }
@@ -401,6 +488,19 @@ export default function Home() {
                     isDragOver={dragOver === file.handle}
                   />
                 ))}
+                
+                {/* Drag Select Overlay */}
+                {isDragSelecting && dragSelectStart && dragSelectEnd && (
+                  <div
+                    className="absolute pointer-events-none border-2 border-blue-500 bg-blue-500/10"
+                    style={{
+                      left: Math.min(dragSelectStart.x, dragSelectEnd.x),
+                      top: Math.min(dragSelectStart.y, dragSelectEnd.y),
+                      width: Math.abs(dragSelectEnd.x - dragSelectStart.x),
+                      height: Math.abs(dragSelectEnd.y - dragSelectStart.y),
+                    }}
+                  />
+                )}
               </div>
             )}
           </div>
@@ -509,13 +609,175 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 bg-neutral-900 border border-neutral-800 rounded-lg shadow-2xl py-1 min-w-48"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {contextMenu.file ? (
+            <>
+              {contextMenu.file.format !== MtpObjectFormat.Association && (
+                <button
+                  onClick={() => {
+                    downloadFile(contextMenu.file!);
+                    setContextMenu(null);
+                  }}
+                  className="w-full px-4 py-2 text-left hover:bg-neutral-800 flex items-center gap-3 text-sm"
+                >
+                  <Download className="w-4 h-4" />
+                  Download
+                </button>
+              )}
+              {contextMenu.file.format === MtpObjectFormat.Association && (
+                <button
+                  onClick={() => {
+                    navigate(contextMenu.file!);
+                    setContextMenu(null);
+                  }}
+                  className="w-full px-4 py-2 text-left hover:bg-neutral-800 flex items-center gap-3 text-sm"
+                >
+                  <FolderInput className="w-4 h-4" />
+                  Open
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setRenameTarget(contextMenu.file!);
+                  setNewName(contextMenu.file!.filename);
+                  setShowRenameDialog(true);
+                  setContextMenu(null);
+                }}
+                className="w-full px-4 py-2 text-left hover:bg-neutral-800 flex items-center gap-3 text-sm"
+              >
+                <Edit2 className="w-4 h-4" />
+                Rename
+              </button>
+              <button
+                onClick={async () => {
+                  if (contextMenu.file) {
+                    await mtpDevice.deleteObject(contextMenu.file.handle);
+                    if (currentStorageId) {
+                      await loadFiles(currentStorageId, currentParentHandle);
+                    }
+                  }
+                  setContextMenu(null);
+                }}
+                className="w-full px-4 py-2 text-left hover:bg-red-500/10 text-red-400 flex items-center gap-3 text-sm"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => {
+                  selectAll();
+                  setContextMenu(null);
+                }}
+                className="w-full px-4 py-2 text-left hover:bg-neutral-800 flex items-center gap-3 text-sm"
+              >
+                <Check className="w-4 h-4" />
+                Select All
+              </button>
+              <button
+                onClick={() => {
+                  setShowCreateFolderDialog(true);
+                  setContextMenu(null);
+                }}
+                className="w-full px-4 py-2 text-left hover:bg-neutral-800 flex items-center gap-3 text-sm"
+              >
+                <FolderPlus className="w-4 h-4" />
+                New Folder
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Details Panel */}
+      {showDetailsPanel && detailsFile && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowDetailsPanel(false)}>
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-4">
+              <h2 className="text-xl font-bold text-white">File Details</h2>
+              <button onClick={() => setShowDetailsPanel(false)} className="text-neutral-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-3">
+              <div>
+                <p className="text-xs text-neutral-500 uppercase">Name</p>
+                <p className="text-white font-medium">{detailsFile.filename}</p>
+              </div>
+              
+              {detailsFile.format !== MtpObjectFormat.Association && (
+                <>
+                  <div>
+                    <p className="text-xs text-neutral-500 uppercase">Size</p>
+                    <p className="text-white">{formatBytes(detailsFile.compressedSize)}</p>
+                  </div>
+                  
+                  <div>
+                    <p className="text-xs text-neutral-500 uppercase">Type</p>
+                    <p className="text-white">{detailsFile.format === MtpObjectFormat.Association ? 'Folder' : 'File'}</p>
+                  </div>
+                </>
+              )}
+              
+              {detailsFile.dateModified && (
+                <div>
+                  <p className="text-xs text-neutral-500 uppercase">Modified</p>
+                  <p className="text-white" title={detailsFile.dateModified}>
+                    {formatMtpDate(detailsFile.dateModified)}
+                  </p>
+                </div>
+              )}
+              
+              {detailsFile.dateCreated && (
+                <div>
+                  <p className="text-xs text-neutral-500 uppercase">Created</p>
+                  <p className="text-white" title={detailsFile.dateCreated}>
+                    {formatMtpDate(detailsFile.dateCreated)}
+                  </p>
+                </div>
+              )}
+            </div>
+            
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowDetailsPanel(false)}
+                className="flex-1 px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white transition-colors"
+              >
+                Close
+              </button>
+              {detailsFile.format !== MtpObjectFormat.Association && (
+                <button
+                  onClick={() => {
+                    downloadFile(detailsFile);
+                    setShowDetailsPanel(false);
+                  }}
+                  className="flex-1 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-colors flex items-center justify-center gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  Download
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
 
 const FileItem = memo(function FileItem({
   file, index, onNavigate, onDownload, loadThumbnail, thumbnailUrl, viewMode, isSelected, onSelect,
-  onDragStart, onDragOver, onDragLeave, onDrop, isDragOver
+  onShowDetails, onContextMenu, onFileDragStart, onDragOver, onDragLeave, onDrop, isDragOver
 }: {
   file: MtpObjectInfo,
   index: number,
@@ -526,7 +788,9 @@ const FileItem = memo(function FileItem({
   viewMode: 'list' | 'grid',
   isSelected: boolean,
   onSelect: (handle: number, index: number, event?: React.MouseEvent) => void,
-  onDragStart: () => void,
+  onShowDetails: (file: MtpObjectInfo) => void,
+  onContextMenu: (e: React.MouseEvent, file: MtpObjectInfo) => void,
+  onFileDragStart: () => void,
   onDragOver: (e: React.DragEvent) => void,
   onDragLeave: () => void,
   onDrop: (e: React.DragEvent) => void,
@@ -582,8 +846,13 @@ const FileItem = memo(function FileItem({
     } else if (isFolder) {
       onNavigate(file);
     } else {
-      onDownload(file);
+      onShowDetails(file);
     }
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    onContextMenu(e, file);
   };
 
   if (viewMode === 'grid') {
@@ -591,8 +860,9 @@ const FileItem = memo(function FileItem({
       <button
         ref={elRef}
         onClick={handleClick}
+        onContextMenu={handleContextMenu}
         draggable
-        onDragStart={onDragStart}
+        onDragStart={onFileDragStart}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
@@ -630,7 +900,7 @@ const FileItem = memo(function FileItem({
               <Film className="w-8 h-8" />
             )
           ) : (
-            <File className="w-8 h-8" />
+            <FileIcon className="w-8 h-8" />
           )}
         </div>
         <div className="min-w-0 w-full">
@@ -660,8 +930,9 @@ const FileItem = memo(function FileItem({
     <button
       ref={elRef}
       onClick={handleClick}
+      onContextMenu={handleContextMenu}
       draggable
-      onDragStart={onDragStart}
+      onDragStart={onFileDragStart}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
@@ -699,7 +970,7 @@ const FileItem = memo(function FileItem({
             <Film className="w-5 h-5" />
           )
         ) : (
-          <File className="w-5 h-5" />
+          <FileIcon className="w-5 h-5" />
         )}
       </div>
       <div className="min-w-0 flex-1">
