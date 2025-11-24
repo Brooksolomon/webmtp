@@ -78,14 +78,14 @@ export default function LandingPage() {
           </motion.div>
 
           <h1 className="text-5xl sm:text-7xl font-bold tracking-tight mb-12 bg-clip-text text-transparent bg-gradient-to-b from-white to-white/40">
-            Manage your Android
+            Android File Transfer
             <br />
-            directly from the web.
+            for macOS
           </h1>
 
           <p className="text-lg sm:text-xl text-white/60 mb-16 max-w-2xl mx-auto leading-relaxed">
-            The fastest way to transfer files between your Android device and your computer.
-            No installation required. Secure, fast, and open source.
+            The best way to manage files between your Android device and Mac.
+            Native MTP support, no installation required. Secure, fast, and open source.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-6 mt-4">
