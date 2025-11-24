@@ -1,4 +1,4 @@
-# **WebMTP — Browser-Based Android File Transfer for macOS & Windows**
+# **WebMTP — Browser-Based Android File Transfer for macOS**
 
 A modern, web-powered MTP (Media Transfer Protocol) client built with **Next.js** and **WebUSB**.  
 Transfer files between your Android device and your computer **directly in the browser**—no installation, no background apps, and no clunky Android File Transfer.
@@ -10,7 +10,7 @@ Transfer files between your Android device and your computer **directly in the b
 - 🚀 **Zero Installation**  
   Runs entirely in the browser—no apps, system extensions, or drivers required.
 
-- 🍏 **Built for macOS & Windows**  
+- 🍏 **Built for macOS**  
   A smooth, reliable replacement for the traditional Android File Transfer app on Mac.
 
 - 📱 **Universal Android Support**  
@@ -33,7 +33,7 @@ Transfer files between your Android device and your computer **directly in the b
   Google Chrome, Microsoft Edge, Opera (browsers with **WebUSB** support)
 
 - **Operating Systems:**  
-  macOS (Intel & Apple Silicon) and Windows
+  macOS (Intel & Apple Silicon)
 
 - **USB Cable:**  
   USB-C ↔ USB-C, USB-A ↔ USB-C, or adapters
