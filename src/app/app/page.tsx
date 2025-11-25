@@ -481,6 +481,10 @@ export default function Home() {
                     <Check className="w-4 h-4 mt-0.5 text-green-400 flex-shrink-0" />
                     <span>Check if your phone shows a notification to allow file transfer</span>
                   </li>
+                  <li className="flex items-start gap-2">
+                    <Check className="w-4 h-4 mt-0.5 text-green-400 flex-shrink-0" />
+                    <span>Refresh the page</span>
+                  </li>
                 </ul>
               </div>
             ) : (
