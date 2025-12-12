@@ -869,7 +869,9 @@ export function useMtp() {
                     const data = await mtpDevice.readFile(file.handle, onProgress, { signal: abortController.signal });
                     const fileHandle2 = await directoryHandle.getFileHandle(file.filename, { create: true });
                     const writable2 = await fileHandle2.createWritable();
-                    await writable2.write(data);
+                    // Ensure data is properly typed for write() - create a new ArrayBuffer
+                    const buffer = new Uint8Array(data).buffer;
+                    await writable2.write(buffer);
                     await writable2.close();
                 }
 
