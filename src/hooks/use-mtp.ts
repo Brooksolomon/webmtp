@@ -321,26 +321,55 @@ export function useMtp() {
         processThumbnailQueue();
     }, [processThumbnailQueue, searchQuery, sortBy, sortOrder]);
 
-    const downloadFile = useCallback(async (file: MtpObjectInfo) => {
-        const transferId = Math.random().toString(36).substring(7);
-        const newTransfer: FileTransfer = {
-            id: transferId,
-            filename: file.filename,
-            loaded: 0,
-            total: file.compressedSize,
-            status: 'pending',
-            timestamp: Date.now(),
-            speed: 0,
-            direction: 'download'
-        };
+    const downloadFile = useCallback(async (file: MtpObjectInfo, skipFilePicker: boolean = false, existingTransferId?: string) => {
+        // IMPORTANT: Call showSaveFilePicker immediately while we still have the user gesture context
+        // This must happen before any async operations or state updates
+        // Skip the picker for bulk downloads to avoid showing it for every file
+        let fileHandle: FileSystemFileHandle | null = null;
+        // @ts-ignore
+        if (!skipFilePicker && window.showSaveFilePicker) {
+            try {
+                // @ts-ignore
+                fileHandle = await window.showSaveFilePicker({
+                    suggestedName: file.filename,
+                });
+            } catch (err: any) {
+                if (err.name === 'AbortError') {
+                    // User cancelled save dialog - exit early
+                    return;
+                }
+                // If showSaveFilePicker fails for other reasons, fall back to memory download
+                fileHandle = null;
+            }
+        }
 
-        setTransfers(prev => [newTransfer, ...prev]);
+        const transferId = existingTransferId || Math.random().toString(36).substring(7);
+        
+        // Only create a new transfer entry if one doesn't already exist
+        if (!existingTransferId) {
+            const newTransfer: FileTransfer = {
+                id: transferId,
+                filename: file.filename,
+                loaded: 0,
+                total: file.compressedSize,
+                status: 'pending',
+                timestamp: Date.now(),
+                speed: 0,
+                direction: 'download'
+            };
 
-        const abortController = new AbortController();
-        transferControlsRef.current[transferId] = {
-            abortController,
-            isPaused: false
-        };
+            setTransfers(prev => [newTransfer, ...prev]);
+        }
+
+        // Only create abort controller if it doesn't already exist (for bulk downloads)
+        if (!transferControlsRef.current[transferId]) {
+            transferControlsRef.current[transferId] = {
+                abortController: new AbortController(),
+                isPaused: false
+            };
+        }
+        
+        const abortController = transferControlsRef.current[transferId].abortController;
 
         let lastLoaded = 0;
         let lastTime = Date.now();
@@ -376,15 +405,10 @@ export function useMtp() {
                 }
             };
 
-            // Check for File System Access API support for large files
-            // @ts-ignore
-            if (window.showSaveFilePicker) {
+            // Use File System Access API if we got a file handle
+            if (fileHandle) {
                 try {
-                    // @ts-ignore
-                    const handle = await window.showSaveFilePicker({
-                        suggestedName: file.filename,
-                    });
-                    const writable = await handle.createWritable();
+                    const writable = await fileHandle.createWritable();
                     const writer = writable.getWriter();
 
                     try {
@@ -424,21 +448,41 @@ export function useMtp() {
                         const a = document.createElement('a');
                         a.href = url;
                         a.download = file.filename;
+                        a.style.display = 'none';
                         document.body.appendChild(a);
                         a.click();
+                        setTimeout(() => {
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                        }, 100);
+                    }
+                } catch (writeErr: any) {
+                    // If creating writable fails, fall back to memory download
+                    console.warn('Failed to create writable, falling back to memory download:', writeErr);
+                    const data = await mtpDevice.readFile(
+                        file.handle,
+                        onProgress,
+                        {
+                            signal: abortController.signal,
+                            pause: pauseCheck
+                        }
+                    );
+
+                    const blob = new Blob([data as unknown as BlobPart], { type: 'application/octet-stream' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = file.filename;
+                    a.style.display = 'none';
+                    document.body.appendChild(a);
+                    a.click();
+                    setTimeout(() => {
                         document.body.removeChild(a);
                         URL.revokeObjectURL(url);
-                    }
-                } catch (err: any) {
-                    if (err.name === 'AbortError') {
-                        // User cancelled save dialog
-                        setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'cancelled' } : t));
-                        return;
-                    }
-                    throw err;
+                    }, 100);
                 }
             } else {
-                // Fallback to memory buffer
+                // Fallback to memory buffer (when File System Access API is not available or failed)
                 const data = await mtpDevice.readFile(
                     file.handle,
                     onProgress,
@@ -453,10 +497,18 @@ export function useMtp() {
                 const a = document.createElement('a');
                 a.href = url;
                 a.download = file.filename;
+                a.style.display = 'none';
                 document.body.appendChild(a);
+                
+                // Trigger download - use both click() and a small delay to ensure browser processes it
                 a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
+                
+                // Keep the element and URL alive briefly to ensure download starts
+                // Then clean up after a short delay
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
             }
 
             setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'completed', loaded: t.total, speed: 0 } : t));
@@ -728,10 +780,108 @@ export function useMtp() {
     }, [currentStorageId, currentParentHandle, loadFiles]);
 
     const downloadMultiple = useCallback(async (handles: number[]) => {
-        for (const handle of handles) {
-            const file = files.find(f => f.handle === handle);
-            if (file && file.format !== MtpObjectFormat.Association) {
-                await downloadFile(file);
+        const filesToDownload = handles
+            .map(handle => files.find(f => f.handle === handle))
+            .filter((file): file is MtpObjectInfo => file !== undefined && file.format !== MtpObjectFormat.Association);
+
+        if (filesToDownload.length === 0) return;
+
+        // Try directory picker once - if it fails, just use individual downloads
+        let directoryHandle: FileSystemDirectoryHandle | null = null;
+        // @ts-ignore
+        if (window.showDirectoryPicker) {
+            try {
+                // @ts-ignore
+                directoryHandle = await window.showDirectoryPicker();
+            } catch (err: any) {
+                if (err.name === 'AbortError') {
+                    return; // User cancelled
+                }
+                // Note: Browser shows its own native error dialog first (we can't prevent this),
+                // but we immediately show our more helpful message with a workaround suggestion.
+                // This covers system files errors, permission errors, and any other access issues.
+                setError('Cannot access the selected directory. Try creating a new folder inside it and selecting that folder instead. Files will download to your default Downloads folder.');
+                directoryHandle = null;
+            }
+        }
+
+        // If directory picker failed or not available, use individual downloads
+        if (!directoryHandle) {
+            for (const file of filesToDownload) {
+                await downloadFile(file, true);
+            }
+            return;
+        }
+
+        // Create all transfer entries upfront
+        const transfers: FileTransfer[] = filesToDownload.map(file => ({
+            id: Math.random().toString(36).substring(7),
+            filename: file.filename,
+            loaded: 0,
+            total: file.compressedSize,
+            status: 'pending' as const,
+            timestamp: Date.now(),
+            speed: 0,
+            direction: 'download' as const
+        }));
+
+        setTransfers(prev => [...transfers, ...prev]);
+
+        // Download all files to the selected directory
+        for (let i = 0; i < filesToDownload.length; i++) {
+            const file = filesToDownload[i];
+            const transferId = transfers[i].id;
+            const abortController = new AbortController();
+            transferControlsRef.current[transferId] = { abortController, isPaused: false };
+
+            let lastLoaded = 0;
+            let lastTime = Date.now();
+
+            try {
+                setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'downloading' } : t));
+
+                const onProgress = (loaded: number, total: number) => {
+                    const now = Date.now();
+                    if (now - lastTime >= 1000) {
+                        const speed = ((loaded - lastLoaded) / (now - lastTime)) * 1000;
+                        setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, loaded, total, speed } : t));
+                        lastTime = now;
+                        lastLoaded = loaded;
+                    } else {
+                        setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, loaded, total } : t));
+                    }
+                };
+
+                const fileHandle = await directoryHandle.getFileHandle(file.filename, { create: true });
+                const writable = await fileHandle.createWritable();
+                const writer = writable.getWriter();
+
+                try {
+                    await mtpDevice.readLargeFile(file.handle, file.compressedSize, writer, onProgress, {
+                        signal: abortController.signal
+                    });
+                    writer.releaseLock();
+                    await writable.close();
+                } catch (err: any) {
+                    // Fallback to memory if streaming fails
+                    writer.releaseLock();
+                    await writable.close();
+                    const data = await mtpDevice.readFile(file.handle, onProgress, { signal: abortController.signal });
+                    const fileHandle2 = await directoryHandle.getFileHandle(file.filename, { create: true });
+                    const writable2 = await fileHandle2.createWritable();
+                    await writable2.write(data);
+                    await writable2.close();
+                }
+
+                setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'completed', loaded: t.total, speed: 0 } : t));
+            } catch (err: any) {
+                if (err.name === 'AbortError') {
+                    setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'cancelled' } : t));
+                } else {
+                    setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: 'error', error: err.message, speed: 0 } : t));
+                }
+            } finally {
+                delete transferControlsRef.current[transferId];
             }
         }
     }, [files, downloadFile]);

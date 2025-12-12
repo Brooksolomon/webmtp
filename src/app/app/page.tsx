@@ -454,6 +454,17 @@ export default function Home() {
               </button>
             )}
 
+            {/* Error Message */}
+            {error && (
+              <div className="flex items-start gap-3 text-amber-400 bg-amber-400/10 px-4 py-3 rounded-lg text-sm border border-amber-400/20 mb-4">
+                <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="font-medium mb-1">Directory Access Issue</p>
+                  <p className="text-amber-300/80">{error}</p>
+                </div>
+              </div>
+            )}
+
             {isLoadingFiles ? (
               <div className="flex flex-col items-center justify-center py-24 text-neutral-500 gap-4">
                 <Loader2 className="w-8 h-8 animate-spin text-blue-500" />

@@ -68,14 +68,24 @@ export default function LandingPage() {
           transition={{ duration: 0.8, ease: "easeOut" }}
           className="text-center max-w-4xl mx-auto mb-16"
         >
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ delay: 0.2, duration: 0.5 }}
-            className="mb-12 inline-flex items-center justify-center p-1 rounded-full bg-white/5 border border-white/10 backdrop-blur-sm"
-          >
-            <EncryptedText text="WebMTP v1.0" className="p-3 m-2 text-xs font-medium tracking-wide uppercase text-white/70"/>
-          </motion.div>
+<motion.div
+  initial={{ scale: 0.9, opacity: 0 }}
+  animate={{ scale: 1, opacity: 1 }}
+  transition={{ delay: 0.2, duration: 0.5 }}
+  className="mb-12 inline-flex items-center justify-center p-1 rounded-full bg-white/5 border border-white/10 backdrop-blur-sm"
+>
+  <div className="flex items-center gap-2 p-3 m-2">
+    <span className="relative flex w-2 h-2">
+      <span className="absolute w-full h-full rounded-full bg-green-500 opacity-75 animate-ping"></span>
+      <span className="relative w-2 h-2 rounded-full bg-green-400"></span>
+    </span>
+
+    <EncryptedText
+      text="WebMTP v1.01"
+      className="text-xs font-medium tracking-wide uppercase text-white/70"
+    />
+  </div>
+</motion.div>
 
           <h1 className="text-5xl sm:text-7xl font-bold tracking-tight mb-12 bg-clip-text text-transparent bg-gradient-to-b from-white to-white/40">
             Android File Transfer
